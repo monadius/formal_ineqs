@@ -78,7 +78,7 @@ let atn0_interval pp l eps x =
 
 (* Computes an interval for 2 ^ -(6n + 5) *)
 let compute_eps1 pp n =
-  let pow = pow_interval pp (6 * n + 5) two_interval in
+  let pow = simple_pow_interval pp (6 * n + 5) two_interval in
     inv_interval pp pow;;
 
 

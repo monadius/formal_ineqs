@@ -38,15 +38,6 @@ let float_of_float_tm tm =
   (float_of_string o approx_num_exp 30 o num_of_float_tm) tm;;
 
 
-(* Creates a float term with the value (n * base^e) *)
-let mk_float =
-	let float_const = `float_num` in
-	fun n e ->
-  let n, s = if n < 0 then -n, `T` else n, `F` in
-  let n_tm = rand (Arith_nat.mk_small_numeral_array n) in
-  let e_tm = rand (Arith_nat.mk_small_numeral_array (e + Float_theory.min_exp)) in
-    mk_comb(mk_comb(mk_comb (float_const, s), n_tm), e_tm);;
-
 (* Creates a (not normalized) floating-point number from a given natural number. *)
 (* Returns the theorem |- &n = float F n min_exp and the term n                  *)
 let float_eq_th_of_num =

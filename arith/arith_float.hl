@@ -21,6 +21,9 @@ module type Arith_float_sig =
     val mk_num_exp : term -> term -> term
     val dest_num_exp : term -> (term * term)
     val dest_float : term -> (string * term * term)
+    val make_float : string -> term -> term -> term
+    val mk_float : int -> int -> term
+
     val float_lt0 : term -> thm
     val float_gt0 : term -> thm
     val float_lt : term -> term -> thm
@@ -63,6 +66,7 @@ module type Arith_float_sig =
 
     val float_interval_round : int -> thm -> thm
 
+    val float_interval_abs : thm -> thm
     val float_interval_neg : thm -> thm
     val float_interval_mul : int -> thm -> thm -> thm
     val float_interval_div : int -> thm -> thm -> thm
@@ -127,6 +131,22 @@ let dest_float tm =
       failwith "dest_float: not float"
     else
       (fst o dest_const) s_tm, n_tm, e_tm;;
+
+(* "s", n, e -> float_num s n e *)
+let make_float =
+  let float_const = `float_num` in
+    fun s n_tm e_tm ->
+      let s_tm = if s = "T" then t_const else f_const in
+	mk_comb (mk_comb (mk_comb (float_const, s_tm), n_tm), e_tm);;
+
+(* Creates a float term with the value (n * base^e) *)
+let mk_float =
+  let float_const = `float_num` in
+    fun n e ->
+      let n, s = if n < 0 then -n, `T` else n, `F` in
+      let n_tm = rand (Arith_nat.mk_small_numeral_array n) in
+      let e_tm = rand (Arith_nat.mk_small_numeral_array (e + Float_theory.min_exp)) in
+	mk_comb(mk_comb(mk_comb (float_const, s), n_tm), e_tm);;
 
 
 (************************************)
@@ -2949,6 +2969,65 @@ let float_interval_round p th =
     MY_PROVE_HYP lo_th (MY_PROVE_HYP hi_th (MY_PROVE_HYP th th0));;
 
 
+(* ------------------------------------------------ *)
+(* Absolute value of an interval                    *)
+(* ------------------------------------------------ *)
+
+let RULE = UNDISCH_ALL o NUMERALS_TO_NUM o PURE_REWRITE_RULE[GSYM IMP_IMP; min_exp_def];;
+
+let float_interval_abs_ft = (RULE o prove)
+  (`interval_arith x (float_num F n1 e1, float_num T n2 e2)
+     ==> interval_arith (abs x) (float_num F 0 min_exp, float_num F 0 min_exp)`,
+   DISCH_THEN (MP_TAC o MATCH_MP FLOAT_INTERVAL_FT_IMP_0) THEN
+     REWRITE_TAC[FLOAT_0; interval_arith] THEN REAL_ARITH_TAC);;
+
+let float_interval_abs_ff = (RULE o prove)
+  (`interval_arith x (float_num F n1 e1, float_num F n2 e2)
+     ==> interval_arith (abs x) (float_num F n1 e1, float_num F n2 e2)`,
+   MP_TAC (SPECL[`n1:num`; `e1:num`] FLOAT_F_POS) THEN 
+     REWRITE_TAC[interval_arith] THEN REAL_ARITH_TAC);;
+
+let float_interval_abs_tt = (RULE o prove)
+  (`interval_arith x (float_num T n1 e1, float_num T n2 e2)
+     ==> interval_arith (abs x) (float_num F n2 e2, float_num F n1 e1)`,
+   MP_TAC ((GSYM o SPEC `T`) FLOAT_NEG) THEN SIMP_TAC[] THEN DISCH_TAC THEN
+     MP_TAC (SPECL[`n2:num`; `e2:num`] FLOAT_T_NEG) THEN
+     REWRITE_TAC[interval_arith] THEN REAL_ARITH_TAC);;
+
+let float_interval_abs_tf = (RULE o prove)
+  (`interval_arith x (float_num T n1 e1, float_num F n2 e2) /\
+     max (float_num F n1 e1) (float_num F n2 e2) = t
+      ==> interval_arith (abs x) (float_num F 0 min_exp, t)`,
+   MP_TAC ((GSYM o SPEC `F`) FLOAT_NEG) THEN SIMP_TAC[] THEN DISCH_TAC THEN
+     REWRITE_TAC[interval_arith; FLOAT_0] THEN REAL_ARITH_TAC);;
+
+let float_interval_abs th =
+  let x, lo, hi = dest_float_interval (concl th) in
+  let s1, n1, e1 = dest_float lo and
+      s2, n2, e2 = dest_float hi in
+  let inst = INST[x, x_var_real; 
+		  n1, n1_var_num; e1, e1_var_num;
+		  n2, n2_var_num; e2, e2_var_num] in
+    if s1 = s2 then
+      if s1 = "F" then
+	(* FF *)
+	MY_PROVE_HYP th (inst float_interval_abs_ff)
+      else
+	(* TT *)
+	MY_PROVE_HYP th (inst float_interval_abs_tt)
+    else
+      if s1 = "F" then
+	(* FT *)
+	MY_PROVE_HYP th (inst float_interval_abs_ft)
+      else
+	let max_th = float_max (make_float "F" n1 e1) hi in
+	let t_tm = rand (concl max_th) in
+	let th0 = INST[x, x_var_real; t_tm, t_var_real;
+		       n1, n1_var_num; e1, e1_var_num;
+		       n2, n2_var_num; e2, e2_var_num] float_interval_abs_tf in
+	  MY_PROVE_HYP max_th (MY_PROVE_HYP th th0);;
+
+
 (****************************************)
 (* float_interval_lt *)
 
@@ -3002,14 +3081,6 @@ let f1_1_var = `f1_1:real` and
     f2_1_var = `f2_1:real` and
     f2_2_var = `f2_2:real`;;
 
-
-let FLOAT_INTERVAL_FT_IMP_0 = prove(`interval_arith x (float_num F n1 e1, float_num T n2 e2) ==> x = &0`,
-				    REWRITE_TAC[interval_arith] THEN STRIP_TAC THEN
-				      REWRITE_TAC[GSYM REAL_LE_ANTISYM] THEN
-				      CONJ_TAC THEN MATCH_MP_TAC REAL_LE_TRANS THENL [
-					EXISTS_TAC `float_num T n2 e2` THEN ASM_REWRITE_TAC[FLOAT_T_NEG];
-					EXISTS_TAC `float_num F n1 e1` THEN ASM_REWRITE_TAC[FLOAT_F_POS]
-				      ]);;
 
 (* FT_xx *)
 let FLOAT_INTERVAL_MUL_FT_xx = (UNDISCH_ALL o NUMERALS_TO_NUM o REWRITE_RULE[GSYM IMP_IMP; min_exp_def] o prove)(
@@ -3677,7 +3748,6 @@ let FLOAT_INTERVAL_DIV_TT_FF = prove(
      REWRITE_TAC[real_div; REAL_INV_NEG; interval_arith] THEN
      REAL_ARITH_TAC);;
 
-let FLOAT_0 = prove(`!s e. float_num s 0 e = &0`, REWRITE_TAC[FLOAT_EQ_0]);;
 
 (* TF_FF *)
 let FLOAT_INTERVAL_DIV_TF_FF = prove(
@@ -3919,10 +3989,6 @@ let float_interval_sub pp th1 th2 =
 (* FLOAT_ABS *)
 
 let s_var_bool = `s:bool`;;
-
-let FLOAT_ABS = prove(`abs (float_num s n e) = float_num F n e`,
-   BOOL_CASES_TAC `s:bool` THEN
-     REWRITE_TAC[FLOAT_NEG_T; REAL_ABS_NEG; REAL_ABS_REFL; FLOAT_F_POS]);;
 
 let float_abs tm =
   let ltm, rtm = dest_comb tm in

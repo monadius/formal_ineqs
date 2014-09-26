@@ -37,6 +37,10 @@ let test n f arg =
     done;
     result, Unix.gettimeofday() -. start;;
 
+(* Do not use when msg is not a fixed string *)
+let assert_msg (cond, msg) =
+  if cond then () else failwith msg;;
+
 (* Generates a power function for the given binary operation *)
 let gen_pow op id n x =
   let ( * ) = op in

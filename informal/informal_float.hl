@@ -15,10 +15,16 @@ module type Informal_float_sig =
     val min_exp : int
     val print_ifloat_fmt : Format.formatter -> ifloat -> unit
     val print_ifloat : ifloat -> unit
-    val mk_float : Num.num -> int -> ifloat
+    val mk_float : int -> int -> ifloat
     val mk_num_float : Num.num -> ifloat
     val mk_small_num_float : int -> ifloat
+    val float0 : ifloat
+    val float1 : ifloat
+    val float2 : ifloat
+    val float3 : ifloat
+    val float4 : ifloat
     val dest_float : ifloat -> bool * Num.num * int
+    val make_float : bool -> Num.num -> int -> ifloat
     val num_of_ifloat : ifloat -> Num.num
     val float_of_ifloat : ifloat -> float
     val sign_float : ifloat -> bool
@@ -45,6 +51,8 @@ module type Informal_float_sig =
     val add_float_hi : int -> ifloat -> ifloat -> ifloat
     val sub_float_lo : int -> ifloat -> ifloat -> ifloat
     val sub_float_hi : int -> ifloat -> ifloat -> ifloat
+    val pow_float_lo : int -> int -> ifloat -> ifloat
+    val pow_float_hi : int -> int -> ifloat -> ifloat
     val sqrt_float_lo : int -> ifloat -> ifloat
     val sqrt_float_hi : int -> ifloat -> ifloat
   end;;
@@ -74,18 +82,24 @@ let print_ifloat = print_ifloat_fmt Format.std_formatter;;
 
 (* Creates a floating-point value *)
 let mk_float n e : ifloat = 
-  if sign_num n < 0 then
-    true, mk_nat (minus_num n), e + min_exp
+  if n < 0 then
+    true, mk_nat (minus_num (Int n)), e + min_exp
   else
-    false, mk_nat n, e + min_exp;;
+    false, mk_nat (Int n), e + min_exp;;
 
 let mk_num_float n = false, mk_nat n, min_exp;;
 
 let mk_small_num_float n = false, mk_small_nat n, min_exp;;
 
-let zero_float = mk_small_num_float 0;;
+let float0 = mk_small_num_float 0 and
+    float1 = mk_small_num_float 1 and
+    float2 = mk_small_num_float 2 and
+    float3 = mk_small_num_float 3 and
+    float4 = mk_small_num_float 4;;
 
 let dest_float ((s, n, e) : ifloat) = s, dest_nat n, e;;
+
+let make_float s n e : ifloat = s, mk_nat n, e;;
 
 let num_of_ifloat =
   let b = num_of_int arith_base in
@@ -236,7 +250,7 @@ let mul_float_eq (s1,n1,e1) (s2,n2,e2) =
 
 let mul_float_lo pp (s1,n1,e1) (s2,n2,e2) =
   if eq0_nat n1 or eq0_nat n2 then
-    zero_float
+    float0
   else
     let s = badd s1 s2 in
     let n' = mul_nat n1 n2 in
@@ -250,7 +264,7 @@ let mul_float_lo pp (s1,n1,e1) (s2,n2,e2) =
 
 let mul_float_hi pp (s1,n1,e1) (s2,n2,e2) =
   if eq0_nat n1 or eq0_nat n2 then
-    zero_float
+    float0
   else
     let s = badd s1 s2 in
     let n' = mul_nat n1 n2 in
@@ -266,7 +280,7 @@ let mul_float_hi pp (s1,n1,e1) (s2,n2,e2) =
 
 let div_float_lo pp (s1,n1,e1) (s2,n2,e2) =
   if eq0_nat n1 then
-    zero_float
+    float0
   else
     let s = badd s1 s2 in
     let k = 2 * pp in
@@ -282,7 +296,7 @@ let div_float_lo pp (s1,n1,e1) (s2,n2,e2) =
 
 let div_float_hi pp (s1,n1,e1) (s2,n2,e2) =
   if eq0_nat n1 then
-    zero_float
+    float0
   else
     let s = badd s1 s2 in
     let k = 2 * pp in
@@ -392,6 +406,72 @@ let rec sqrt_float_hi pp (s,n1,e1) =
 	  failwith "sqrt_float_hi: underflow"
 	else
 	  (s, n, e);;
+
+(* pow *)
+
+let pow_float_pos_hi pp n (x : ifloat) =
+  let rec pow n =
+    match n with
+      | 0 -> float1
+      | 1 -> x
+      | 2 -> mul_float_hi pp x x
+      | _ ->
+	  if (n land 1) = 0 then
+	    let t = pow (n lsr 1) in
+	      mul_float_hi pp t t
+	  else
+	    let t = pow (n - 1) in
+	      mul_float_hi pp x t in
+  let _ = assert (n >= 0) in
+    pow n;;
+
+let pow_float_pos_lo pp n (x : ifloat) =
+  let rec pow n =
+    match n with
+      | 0 -> float1
+      | 1 -> x
+      | 2 -> mul_float_lo pp x x
+      | _ ->
+	  if (n land 1) = 0 then
+	    let t = pow (n lsr 1) in
+	      mul_float_lo pp t t
+	  else
+	    let t = pow (n - 1) in
+	      mul_float_lo pp x t in
+  let _ = assert (n >= 0) in
+    pow n;;
+	  
+let pow_float_hi pp n x =
+  match n with
+    | 0 -> float1
+    | 1 -> x
+    | 2 -> mul_float_hi pp x x
+    | _ ->
+	let _ = assert (n > 2) in
+	  if not (sign_float x) then
+	    pow_float_pos_hi pp n x
+	  else
+	    let x_pos = abs_float x in
+	      if (n land 1) = 0 then
+		pow_float_pos_hi pp n x_pos
+	      else
+		neg_float (pow_float_pos_lo pp n x_pos);;
+
+let pow_float_lo pp n x =
+  match n with
+    | 0 -> float1
+    | 1 -> x
+    | 2 -> mul_float_lo pp x x
+    | _ ->
+	let _ = assert (n > 2) in
+	  if not (sign_float x) then
+	    pow_float_pos_lo pp n x
+	  else
+	    let x_pos = abs_float x in
+	      if (n land 1) = 0 then
+		pow_float_pos_lo pp n x_pos
+	      else
+		neg_float (pow_float_pos_hi pp n x_pos);;
 
 end;;
 

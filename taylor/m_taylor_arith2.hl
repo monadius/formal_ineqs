@@ -19,7 +19,9 @@ open Misc_functions;;
 open Arith_nat;;
 open Arith_float;;
 open More_float;;
-open Float_atn;;
+open Float_pow;;
+open Atn_eval;;
+open Asn_acs_eval;;
 open Cos_eval;;
 open Sin_eval;;
 open Matan_eval;;
@@ -589,7 +591,7 @@ let eval_m_taylor_atn2 n p_lin p_second taylor1_th =
   (* u'(f x), u''(f x) *)
   let d1_th0, d2_th0 =
     let neg, inv, ( + ), ( * ), pow2 = float_interval_neg, float_interval_inv p_second, 
-      float_interval_add p_second, float_interval_mul p_second, float_interval_pow_simple p_second 2 in
+      float_interval_add p_second, float_interval_mul p_second, float_interval_pow p_second 2 in
     let inv_one_ff = inv (one_interval + f1_bound * f1_bound) in
       inv_one_ff, (neg_two_interval * f1_bound) * pow2 inv_one_ff in
 
@@ -841,7 +843,7 @@ let eval_m_taylor_asn2 n p_lin p_second taylor1_th =
   let d1_th0, d2_th0 =
     let sqrt, inv = float_interval_sqrt p_second, float_interval_inv p_second in
     let ( - ), ( * ), ( / ), pow3 = float_interval_sub p_second, float_interval_mul p_second,
-      float_interval_div p_second, float_interval_pow_simple p_second 3 in
+      float_interval_div p_second, float_interval_pow p_second 3 in
     let ff_1 = one_interval - f1_bound * f1_bound in
       inv (sqrt ff_1), f1_bound / sqrt (pow3 ff_1) in
 
@@ -930,7 +932,7 @@ let eval_m_taylor_acs2 n p_lin p_second taylor1_th =
   let d1_th0, d2_th0 =
     let neg, sqrt, inv = float_interval_neg, float_interval_sqrt p_second, float_interval_inv p_second in
     let ( - ), ( * ), ( / ), pow3 = float_interval_sub p_second, float_interval_mul p_second,
-      float_interval_div p_second, float_interval_pow_simple p_second 3 in
+      float_interval_div p_second, float_interval_pow p_second 3 in
     let ff_1 = one_interval - f1_bound * f1_bound in
       inv (sqrt ff_1), neg (f1_bound / sqrt (pow3 ff_1)) in
 

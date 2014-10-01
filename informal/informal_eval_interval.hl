@@ -5,6 +5,7 @@
 (* =========================================================== *)
 
 needs "informal/informal_atn.hl";;
+needs "informal/informal_asn_acs.hl";;
 needs "informal/informal_sin_cos.hl";;
 needs "informal/informal_matan.hl";;
 
@@ -14,6 +15,7 @@ module Informal_eval_interval = struct
 open Informal_interval;;
 open Informal_float;;
 open Informal_atn;;
+open Informal_asn_acs;;
 open Informal_sin_cos;;
 open Informal_matan;;
 

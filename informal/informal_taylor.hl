@@ -15,6 +15,7 @@ open Misc_functions;;
 open Informal_interval;;
 open Informal_float;;
 open Informal_atn;;
+open Informal_asn_acs;;
 open Informal_sin_cos;;
 open Informal_matan;;
 open Informal_eval_interval;;
@@ -112,7 +113,7 @@ let mk_eval_function pp0 f_tm =
 
 
 (* error_mul_f2_hi *)
-let error_mul_f2_hi pp a int = mul_float_hi pp a (abs_interval int);;
+let error_mul_f2_hi pp a int = mul_float_hi pp a (iabs_interval int);;
 
 
 (* eval_m_taylor_error *)
@@ -447,7 +448,6 @@ let eval_m_taylor_sin p_lin p_second ti =
       cos f1_bound, neg (sin f1_bound) in
   let ddf = 
     let ( * ), ( + ) = mul_interval p_second, add_interval p_second in
-    let neg = neg_interval in
       map2 (fun dd_list di1 ->
 	      my_map2 (fun dd dj1 ->
 			 (d2 * dj1) * di1 + d1 * dd) dd_list d1_bounds) ti.ddf d1_bounds in

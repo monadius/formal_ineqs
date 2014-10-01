@@ -5,7 +5,6 @@
 (* =========================================================== *)
 
 needs "arith/more_float.hl";;
-needs "arith/float_atn.hl";;
 needs "arith/eval_interval.hl";;
 needs "list/list_conversions.hl";;
 needs "list/list_float.hl";;
@@ -1061,9 +1060,10 @@ let dest_m_taylor_thms n =
 		      d_bounds_list, d_bounds_list_var; dd_bounds_list, dd_bounds_list_var] o
 		   inst_first_type_var ty) M_TAYLOR_INTERVAL' in
       let th1 = EQ_MP th0 m_taylor_th in
-      let [domain_th; d2_th; lin_th; second_th] = CONJUNCTS th1 in
-	domain_th, d2_th, lin_th, second_th;;
-  
+	match (CONJUNCTS th1) with
+	  | [domain_th; d2_th; lin_th; second_th] -> 
+	      domain_th, d2_th, lin_th, second_th
+	  | _ -> failwith "dest_m_taylor_thms";;
 
 
 (**********************)

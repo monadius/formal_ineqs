@@ -8,6 +8,16 @@
 
 module Misc_functions = struct
 
+exception Error of string * term list * thm list;;
+
+let error msg tms ths = raise (Error (msg, tms, ths));;
+
+let error_msg msg = raise (Error (msg, [], []));;
+
+let error_fmt str fmt =
+  let msg = sprintf str fmt in
+    error_msg msg;;
+
 (* A little faster version of PROVE_HYP *)
 let MY_PROVE_HYP hyp th = EQ_MP (DEDUCT_ANTISYM_RULE hyp th) hyp;;
 

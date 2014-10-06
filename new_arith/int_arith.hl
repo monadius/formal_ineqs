@@ -1,0 +1,582 @@
+(* =========================================================== *)
+(* Formal integer arithmetic with an arbitrary base            *)
+(* Author: Alexey Solovyev                                     *)
+(* Date: 2014-10-06                                            *)
+(* =========================================================== *)
+
+module type Int_arith_sig =
+  sig
+    val pos_int : thm
+    val neg_int : thm
+    val pos_int_const : term
+    val neg_int_const : term
+
+    val mk_int : Num.num -> term
+    val mk_small_int : int -> term
+    val dest_int : term -> Num.num
+
+    val ineg : term -> thm
+
+    val ieq : term -> term -> thm * bool
+    val ilt : term -> term -> thm * bool
+    val ile : term -> term -> thm * bool
+
+    val iadd : term -> term -> thm
+    val isub : term -> term -> thm
+    val imul : term -> term -> thm
+end;;
+
+(* Dependencies *)
+needs "new_arith/nat_arith.hl";;
+
+module Int_arith : Int_arith_sig = struct
+
+open Num;;
+open Nat_arith;;
+open Misc_functions;;
+open Misc_vars;;
+
+(* ------------------------------------------------------------------------- *)
+(* Definitions and constants                                                 *)
+(* ------------------------------------------------------------------------- *)
+
+let pos_int = new_definition `pos_int n = &n : int`;;
+let neg_int = new_definition `neg_int n = -- &n : int`;;
+
+let pos_int_const = `pos_int` and
+    neg_int_const = `neg_int`;;
+
+let th_rule = UNDISCH_ALL o PURE_REWRITE_RULE[GSYM IMP_IMP];;
+
+let INT_TAC = 
+  REWRITE_TAC[pos_int; neg_int; GSYM INT_OF_NUM_EQ; 
+	      GSYM INT_OF_NUM_ADD; GSYM INT_OF_NUM_MUL;
+	      GSYM INT_OF_NUM_LE; GSYM INT_OF_NUM_LT] THEN
+    INT_ARITH_TAC;;
+
+(* ------------------------------------------------------------------------- *)
+(* mk_int, dest_int                                                          *)
+(* ------------------------------------------------------------------------- *)
+
+let mk_int n =
+  if sign_num n >= 0 then
+    mk_comb (pos_int_const, mk_nat n)
+  else
+    mk_comb (neg_int_const, mk_nat (abs_num n));;
+
+let mk_small_int n =
+  if n >= 0 then
+    mk_comb (pos_int_const, mk_small_nat n)
+  else
+    mk_comb (neg_int_const, mk_small_nat (-n));;
+
+let dest_int tm =
+  match tm with
+    | Comb (Const ("pos_int", _), n_tm) ->
+	dest_nat n_tm
+    | Comb (Const ("neg_int", _), n_tm) ->
+	minus_num (dest_nat n_tm)
+    | _ -> error "dest_int" [tm] [];;
+
+(* ------------------------------------------------------------------------- *)
+(* -a: ineg                                                                  *)
+(* ------------------------------------------------------------------------- *)
+
+let neg_pos = prove
+  (`-- pos_int n = neg_int n`,
+   INT_TAC);;
+
+let neg_neg = prove
+  (`-- neg_int n = pos_int n`,
+   INT_TAC);;
+
+let ineg tm =
+  match tm with
+    | Comb (Const ("pos_int", _), n_tm) ->
+	INST[n_tm, n_var_num] neg_pos
+    | Comb (Const ("neg_int", _), n_tm) ->
+	INST[n_tm, n_var_num] neg_neg
+    | _ -> error "ineg" [tm] [];;
+
+(* ------------------------------------------------------------------------- *)
+(* a = b: ieq                                                                *)
+(* ------------------------------------------------------------------------- *)
+
+let eq_pos_pos = (th_rule o prove)
+  (`pos_int m = pos_int n <=> m = n`,
+   INT_TAC);;
+
+let eq_neg_neg = (th_rule o prove)
+  (`neg_int m = neg_int n <=> m = n`,
+   INT_TAC);;
+
+let eq_pos_neg_t = (th_rule o prove)
+  (`(m = 0 <=> T) /\ (n = 0 <=> T) ==> (pos_int m = neg_int n <=> T)`,
+   INT_TAC);;
+
+let eq_pos_neg_f1 = (th_rule o prove)
+  (`(m = 0 <=> F) ==> (pos_int m = neg_int n <=> F)`,
+   INT_TAC);;
+
+let eq_pos_neg_f2 = (th_rule o prove)
+  (`(n = 0 <=> F) ==> (pos_int m = neg_int n <=> F)`,
+   INT_TAC);;
+
+let eq_neg_pos_t = (th_rule o prove)
+  (`(m = 0 <=> T) /\ (n = 0 <=> T) ==> (neg_int m = pos_int n <=> T)`,
+   INT_TAC);;
+
+let eq_neg_pos_f1 = (th_rule o prove)
+  (`(m = 0 <=> F) ==> (neg_int m = pos_int n <=> F)`,
+   INT_TAC);;
+
+let eq_neg_pos_f2 = (th_rule o prove)
+  (`(n = 0 <=> F) ==> (neg_int m = pos_int n <=> F)`,
+   INT_TAC);;
+
+let ieq ltm rtm =
+  match ltm with
+    | Comb (Const ("pos_int", _), m_tm) ->
+	begin
+	  match rtm with
+	    | Comb (Const ("pos_int", _), n_tm) ->
+		let eq_th, flag = neq m_tm n_tm in
+		let th0 = INST[m_tm, m_var_num; n_tm, n_var_num] eq_pos_pos in
+		  TRANS th0 eq_th, flag
+	    | Comb (Const ("neg_int", _), n_tm) ->
+		let m0_th, flag = neq0 m_tm in
+		  if not flag then
+		    let th0 = INST[m_tm, m_var_num; n_tm, n_var_num] eq_pos_neg_f1 in
+		      MY_PROVE_HYP m0_th th0, false
+		  else
+		    let n0_th, flag = neq0 n_tm in
+		      if not flag then
+			let th0 = INST[m_tm, m_var_num; n_tm, n_var_num] eq_pos_neg_f2 in
+			  MY_PROVE_HYP n0_th th0, false
+		      else
+			let th0 = INST[m_tm, m_var_num; n_tm, n_var_num] eq_pos_neg_t in
+			  MY_PROVE_HYP m0_th (MY_PROVE_HYP n0_th th0), true
+	    | _ -> error "ieq" [ltm; rtm] []
+	end
+    | Comb (Const ("neg_int", _), m_tm) ->
+	begin
+	  match rtm with
+	    | Comb (Const ("pos_int", _), n_tm) ->
+		let m0_th, flag = neq0 m_tm in
+		  if not flag then
+		    let th0 = INST[m_tm, m_var_num; n_tm, n_var_num] eq_neg_pos_f1 in
+		      MY_PROVE_HYP m0_th th0, false
+		  else
+		    let n0_th, flag = neq0 n_tm in
+		      if not flag then
+			let th0 = INST[m_tm, m_var_num; n_tm, n_var_num] eq_neg_pos_f2 in
+			  MY_PROVE_HYP n0_th th0, false
+		      else
+			let th0 = INST[m_tm, m_var_num; n_tm, n_var_num] eq_neg_pos_t in
+			  MY_PROVE_HYP m0_th (MY_PROVE_HYP n0_th th0), true
+	    | Comb (Const ("neg_int", _), n_tm) ->
+		let eq_th, flag = neq m_tm n_tm in
+		let th0 = INST[m_tm, m_var_num; n_tm, n_var_num] eq_neg_neg in
+		  TRANS th0 eq_th, flag
+	    | _ -> error "ieq" [ltm; rtm] []
+	end
+    | _ -> error "ieq" [ltm; rtm] [];;
+
+(* ------------------------------------------------------------------------- *)
+(* a < b: ilt                                                                *)
+(* ------------------------------------------------------------------------- *)
+
+let lt_pos_pos = (th_rule o prove)
+  (`pos_int m < pos_int n <=> m < n`,
+   INT_TAC);;
+
+let lt_neg_neg = (th_rule o prove)
+  (`neg_int m < neg_int n <=> n < m`,
+   INT_TAC);;
+
+let lt_pos_neg = (th_rule o prove)
+  (`pos_int m < neg_int n <=> F`,
+   INT_TAC);;
+
+let lt_neg_pos_f = (th_rule o prove)
+  (`(n = 0 <=> F) ==> (neg_int m < pos_int n <=> T)`,
+   INT_TAC);;
+
+let lt_neg_pos_t = (th_rule o prove)
+  (`(n = 0 <=> T) ==> (neg_int m < pos_int n <=> 0 < m)`,
+   INT_TAC);;
+   
+let ilt ltm rtm =
+  match ltm with
+    | Comb (Const ("pos_int", _), m_tm) ->
+	begin
+	  match rtm with
+	    | Comb (Const ("pos_int", _), n_tm) ->
+		let lt_th, flag = nlt m_tm n_tm in
+		let th0 = INST[m_tm, m_var_num; n_tm, n_var_num] lt_pos_pos in
+		  TRANS th0 lt_th, flag
+	    | Comb (Const ("neg_int", _), n_tm) ->
+		INST[m_tm, m_var_num; n_tm, n_var_num] lt_pos_neg, false
+	    | _ -> error "ilt" [ltm; rtm] []
+	end
+    | Comb (Const ("neg_int", _), m_tm) ->
+	begin
+	  match rtm with
+	    | Comb (Const ("pos_int", _), n_tm) ->
+		let n0_th, flag = neq0 n_tm in
+		  if not flag then
+		    let th0 = INST[m_tm, m_var_num; n_tm, n_var_num] lt_neg_pos_f in
+		      MY_PROVE_HYP n0_th th0, true
+		  else
+		    let mgt0_th, flag = ngt0 m_tm in
+		    let th0 = INST[m_tm, m_var_num; n_tm, n_var_num] lt_neg_pos_t in
+		      TRANS (MY_PROVE_HYP n0_th th0) mgt0_th, flag
+	    | Comb (Const ("neg_int", _), n_tm) ->
+		let lt_th, flag = nlt n_tm m_tm in
+		let th0 = INST[m_tm, m_var_num; n_tm, n_var_num] lt_neg_neg in
+		  TRANS th0 lt_th, flag
+	    | _ -> error "ilt" [ltm; rtm] []
+	end
+    | _ -> error "ilt" [ltm; rtm] [];;
+
+(* ------------------------------------------------------------------------- *)
+(* a <= b: ile                                                               *)
+(* ------------------------------------------------------------------------- *)
+
+let le_pos_pos = (th_rule o prove)
+  (`pos_int m <= pos_int n <=> m <= n`,
+   INT_TAC);;
+
+let le_neg_neg = (th_rule o prove)
+  (`neg_int m <= neg_int n <=> n <= m`,
+   INT_TAC);;
+
+let le_neg_pos = (th_rule o prove)
+  (`neg_int m <= pos_int n <=> T`,
+   INT_TAC);;
+
+let le_pos_neg_f = (th_rule o prove)
+  (`(n = 0 <=> F) ==> (pos_int m <= neg_int n <=> F)`,
+   INT_TAC);;
+
+let le_pos_neg_t = (th_rule o prove)
+  (`(n = 0 <=> T) ==> (pos_int m <= neg_int n <=> m = 0)`,
+   INT_TAC);;
+   
+let ile ltm rtm =
+  match ltm with
+    | Comb (Const ("pos_int", _), m_tm) ->
+	begin
+	  match rtm with
+	    | Comb (Const ("pos_int", _), n_tm) ->
+		let le_th, flag = nle m_tm n_tm in
+		let th0 = INST[m_tm, m_var_num; n_tm, n_var_num] le_pos_pos in
+		  TRANS th0 le_th, flag
+	    | Comb (Const ("neg_int", _), n_tm) ->
+		let n0_th, flag = neq0 n_tm in
+		  if not flag then
+		    let th0 = INST[m_tm, m_var_num; n_tm, n_var_num] le_pos_neg_f in
+		      MY_PROVE_HYP n0_th th0, false
+		  else
+		    let m0_th, flag = neq0 m_tm in
+		    let th0 = INST[m_tm, m_var_num; n_tm, n_var_num] le_pos_neg_t in
+		      TRANS (MY_PROVE_HYP n0_th th0) m0_th, flag
+	    | _ -> error "ile" [ltm; rtm] []
+	end
+    | Comb (Const ("neg_int", _), m_tm) ->
+	begin
+	  match rtm with
+	    | Comb (Const ("pos_int", _), n_tm) ->
+		INST[m_tm, m_var_num; n_tm, n_var_num] le_neg_pos, true
+	    | Comb (Const ("neg_int", _), n_tm) ->
+		let le_th, flag = nle n_tm m_tm in
+		let th0 = INST[m_tm, m_var_num; n_tm, n_var_num] le_neg_neg in
+		  TRANS th0 le_th, flag
+	    | _ -> error "ile" [ltm; rtm] []
+	end
+    | _ -> error "ile" [ltm; rtm] [];;
+
+(* ------------------------------------------------------------------------- *)
+(* a + b: iadd                                                               *)
+(* ------------------------------------------------------------------------- *)
+
+let add_pos_pos = (th_rule o prove)
+  (`m + n = r <=> pos_int m + pos_int n = pos_int r`,
+   INT_TAC);;
+
+let add_neg_neg = (th_rule o prove)
+  (`m + n = r <=> neg_int m + neg_int n = neg_int r`,
+   INT_TAC);;
+
+let add_pos_neg_pos = (th_rule o prove)
+  (`n + r = m <=> pos_int m + neg_int n = pos_int r`,
+   INT_TAC);;
+
+let add_pos_neg_neg = (th_rule o prove)
+  (`m + r = n <=> pos_int m + neg_int n = neg_int r`,
+   INT_TAC);;
+
+let add_neg_pos_pos = (th_rule o prove)
+  (`m + r = n <=> neg_int m + pos_int n = pos_int r`,
+   INT_TAC);;
+
+let add_neg_pos_neg = (th_rule o prove)
+  (`n + r = m <=> neg_int m + pos_int n = neg_int r`,
+   INT_TAC);;
+
+let iadd ltm rtm =
+  match ltm with
+    | Comb (Const ("pos_int", _), m_tm) ->
+	begin
+	  match rtm with
+	    | Comb (Const ("pos_int", _), n_tm) ->
+		let add_th = nadd m_tm n_tm in
+		let r_tm = rand (concl add_th) in
+		let th0 = INST[m_tm, m_var_num; n_tm, n_var_num; 
+			       r_tm, r_var_num] add_pos_pos in
+		  EQ_MP th0 add_th
+	    | Comb (Const ("neg_int", _), n_tm) ->
+		let m = dest_nat m_tm and
+		    n = dest_nat n_tm in
+		let r = m -/ n in
+		  if sign_num r >= 0 then
+		    let r_tm = mk_nat r in
+		    let add_th = nadd n_tm r_tm in
+		    let th0 = INST[m_tm, m_var_num; n_tm, n_var_num;
+				   r_tm, r_var_num] add_pos_neg_pos in
+		      EQ_MP th0 add_th
+		  else
+		    let r_tm = mk_nat (abs_num r) in
+		    let add_th = nadd m_tm r_tm in
+		    let th0 = INST[m_tm, m_var_num; n_tm, n_var_num;
+				   r_tm, r_var_num] add_pos_neg_neg in
+		      EQ_MP th0 add_th
+	    | _ -> error "iadd" [ltm; rtm] []
+	end
+    | Comb (Const ("neg_int", _), m_tm) ->
+	begin
+	  match rtm with
+	    | Comb (Const ("pos_int", _), n_tm) ->
+		let m = dest_nat m_tm and
+		    n = dest_nat n_tm in
+		let r = m -/ n in
+		  if sign_num r >= 0 then
+		    let r_tm = mk_nat r in
+		    let add_th = nadd n_tm r_tm in
+		    let th0 = INST[m_tm, m_var_num; n_tm, n_var_num;
+				   r_tm, r_var_num] add_neg_pos_neg in
+		      EQ_MP th0 add_th
+		  else
+		    let r_tm = mk_nat (abs_num r) in
+		    let add_th = nadd m_tm r_tm in
+		    let th0 = INST[m_tm, m_var_num; n_tm, n_var_num;
+				   r_tm, r_var_num] add_neg_pos_pos in
+		      EQ_MP th0 add_th
+	    | Comb (Const ("neg_int", _), n_tm) ->
+		let add_th = nadd m_tm n_tm in
+		let r_tm = rand (concl add_th) in
+		let th0 = INST[m_tm, m_var_num; n_tm, n_var_num; 
+			       r_tm, r_var_num] add_neg_neg in
+		  EQ_MP th0 add_th
+	    | _ -> error "iadd" [ltm; rtm] []
+	end
+    | _ -> error "iadd" [ltm; rtm] [];;
+
+(* ------------------------------------------------------------------------- *)
+(* a - b: isub                                                               *)
+(* ------------------------------------------------------------------------- *)
+
+let sub_pos_neg = (th_rule o prove)
+  (`m + n = r <=> pos_int m - neg_int n = pos_int r`,
+   INT_TAC);;
+
+let sub_neg_pos = (th_rule o prove)
+  (`m + n = r <=> neg_int m - pos_int n = neg_int r`,
+   INT_TAC);;
+
+let sub_pos_pos_pos = (th_rule o prove)
+  (`n + r = m <=> pos_int m - pos_int n = pos_int r`,
+   INT_TAC);;
+
+let sub_pos_pos_neg = (th_rule o prove)
+  (`m + r = n <=> pos_int m - pos_int n = neg_int r`,
+   INT_TAC);;
+
+let sub_neg_neg_pos = (th_rule o prove)
+  (`m + r = n <=> neg_int m - neg_int n = pos_int r`,
+   INT_TAC);;
+
+let sub_neg_neg_neg = (th_rule o prove)
+  (`n + r = m <=> neg_int m - neg_int n = neg_int r`,
+   INT_TAC);;
+
+let isub ltm rtm =
+  match ltm with
+    | Comb (Const ("pos_int", _), m_tm) ->
+	begin
+	  match rtm with
+	    | Comb (Const ("pos_int", _), n_tm) ->
+		let m = dest_nat m_tm and
+		    n = dest_nat n_tm in
+		let r = m -/ n in
+		  if sign_num r >= 0 then
+		    let r_tm = mk_nat r in
+		    let add_th = nadd n_tm r_tm in
+		    let th0 = INST[m_tm, m_var_num; n_tm, n_var_num;
+				   r_tm, r_var_num] sub_pos_pos_pos in
+		      EQ_MP th0 add_th
+		  else
+		    let r_tm = mk_nat (abs_num r) in
+		    let add_th = nadd m_tm r_tm in
+		    let th0 = INST[m_tm, m_var_num; n_tm, n_var_num;
+				   r_tm, r_var_num] sub_pos_pos_neg in
+		      EQ_MP th0 add_th
+	    | Comb (Const ("neg_int", _), n_tm) ->
+		let add_th = nadd m_tm n_tm in
+		let r_tm = rand (concl add_th) in
+		let th0 = INST[m_tm, m_var_num; n_tm, n_var_num; 
+			       r_tm, r_var_num] sub_pos_neg in
+		  EQ_MP th0 add_th
+	    | _ -> error "isub" [ltm; rtm] []
+	end
+    | Comb (Const ("neg_int", _), m_tm) ->
+	begin
+	  match rtm with
+	    | Comb (Const ("pos_int", _), n_tm) ->
+		let add_th = nadd m_tm n_tm in
+		let r_tm = rand (concl add_th) in
+		let th0 = INST[m_tm, m_var_num; n_tm, n_var_num; 
+			       r_tm, r_var_num] sub_neg_pos in
+		  EQ_MP th0 add_th
+	    | Comb (Const ("neg_int", _), n_tm) ->
+		let m = dest_nat m_tm and
+		    n = dest_nat n_tm in
+		let r = m -/ n in
+		  if sign_num r >= 0 then
+		    let r_tm = mk_nat r in
+		    let add_th = nadd n_tm r_tm in
+		    let th0 = INST[m_tm, m_var_num; n_tm, n_var_num;
+				   r_tm, r_var_num] sub_neg_neg_neg in
+		      EQ_MP th0 add_th
+		  else
+		    let r_tm = mk_nat (abs_num r) in
+		    let add_th = nadd m_tm r_tm in
+		    let th0 = INST[m_tm, m_var_num; n_tm, n_var_num;
+				   r_tm, r_var_num] sub_neg_neg_pos in
+		      EQ_MP th0 add_th
+	    | _ -> error "isub" [ltm; rtm] []
+	end
+    | _ -> error "isub" [ltm; rtm] [];;
+
+(* ------------------------------------------------------------------------- *)
+(* a * b: imul                                                               *)
+(* ------------------------------------------------------------------------- *)
+
+let mul_pos_pos = (th_rule o prove)
+  (`m * n = r <=> pos_int m * pos_int n = pos_int r`,
+   INT_TAC);;
+
+let mul_neg_neg = (th_rule o prove)
+  (`m * n = r <=> neg_int m * neg_int n = pos_int r`,
+   INT_TAC);;
+
+let mul_pos_neg = (th_rule o prove)
+  (`m * n = r <=> pos_int m * neg_int n = neg_int r`,
+   INT_TAC);;
+
+let mul_neg_pos = (th_rule o prove)
+  (`m * n = r <=> neg_int m * pos_int n = neg_int r`,
+   INT_TAC);;
+
+let imul ltm rtm =
+  let s1, m_tm = dest_comb ltm in
+  let s2, n_tm = dest_comb rtm in
+  let mul_th = nmul m_tm n_tm in
+  let r_tm = rand (concl mul_th) in
+  let inst = INST[m_tm, m_var_num; n_tm, n_var_num; r_tm, r_var_num] in
+    match s1 with
+      | Const ("pos_int", _) ->
+	  (match s2 with
+	     | Const ("pos_int", _) ->
+		 EQ_MP (inst mul_pos_pos) mul_th
+	     | Const ("neg_int", _) ->
+		 EQ_MP (inst mul_pos_neg) mul_th
+	     | _ -> error "imul" [ltm; rtm] [])
+      | Const ("neg_int", _) ->
+	  (match s2 with
+	     | Const ("pos_int", _) ->
+		 EQ_MP (inst mul_neg_pos) mul_th
+	     | Const ("neg_int", _) ->
+		 EQ_MP (inst mul_neg_neg) mul_th
+	     | _ -> error "imul" [ltm; rtm] [])
+      | _ -> error "imul" [ltm; rtm] [];;
+
+end;;
+
+(*
+
+(********************)
+
+let ntm1 = replace_numerals `52` and
+    ntm2 = replace_numerals `511`;;
+
+let tm1 = mk_comb (`pos_int`, ntm1) and
+    tm2 = mk_comb (`pos_int`, ntm2);;
+
+let itm1 = mk_comb (`neg_int`, ntm1) and
+    itm2 = mk_comb (`neg_int`, ntm2);;
+
+let z_tm = replace_numerals `pos_int 0`;;
+let nz_tm = replace_numerals `neg_int 0`;;
+
+ile tm1 tm2;;
+ile itm1 itm2;;
+ile itm2 itm1;;
+ile tm1 itm2;;
+ile itm1 tm2;;
+ile z_tm z_tm;;
+ile nz_tm nz_tm;;
+ile z_tm nz_tm;;
+ile nz_tm z_tm;;
+ile z_tm itm2;;
+ile nz_tm itm2;;
+ile nz_tm tm2;;
+ile z_tm tm2;;
+ile itm2 nz_tm;;
+ile tm2 nz_tm;;
+ile tm1 nz_tm;;
+ile tm1 tm1;;
+ile tm2 tm2;;
+ile itm1 itm1;;
+ile itm2 itm2;;
+
+iadd tm1 tm2;;
+iadd itm1 itm2;;
+iadd tm1 itm2;;
+iadd itm1 tm2;;
+iadd itm2 tm1;;
+iadd tm2 itm1;;
+
+isub tm1 tm2;;
+isub itm1 itm2;;
+isub tm1 itm2;;
+isub itm1 tm2;;
+isub itm2 tm1;;
+isub tm2 itm1;;
+
+imul tm1 tm2;;
+imul itm1 itm2;;
+imul tm1 itm2;;
+imul itm1 tm2;;
+imul itm2 tm1;;
+imul tm2 itm1;;
+
+(* 1.280 *)
+test 100000 (nadd ntm1) ntm2;;
+(* 1.842 *)
+test 100000 (iadd tm1) tm2;;
+
+(* 2.816 *)
+test 100000 (iadd itm1) tm2;;
+
+*)

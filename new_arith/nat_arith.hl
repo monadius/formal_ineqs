@@ -354,7 +354,7 @@ let pre_th =
       let pre_tm = mk_comb (const_array.(pre), n_var_num) in
       let suc_th = nsuc pre_tm in
       let n_tm = rand (concl suc_th) in
-      let n0_th = neq0 n_tm in
+      let n0_th, _ = neq0 n_tm in
       let th0 = INST[pre_tm, m_var_num; n_tm, n_var_num] lemma in
 	MY_PROVE_HYP n0_th (EQ_MP th0 suc_th);;
 
@@ -1367,7 +1367,7 @@ let ndiv =
       let qn_tm = rand (concl qn_th) in
       let qnr_th = nadd qn_tm r_tm in
       let th1 = TRANS (AP_THM (AP_TERM add_op_num qn_th) r_tm) qnr_th in
-      let th2 = nlt r_tm n_tm in
+      let th2, _ = nlt r_tm n_tm in
       let th0 = INST[r_tm, r_var_num; n_tm, n_var_num; 
 		     m_tm, m_var_num; q_tm, q_var_num] div_uniq in
 	MY_PROVE_HYP th1 (MY_PROVE_HYP th2 th0);;

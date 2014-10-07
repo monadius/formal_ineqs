@@ -37,6 +37,11 @@ module type Nat_arith_sig =
     val nsub_le : term -> term -> thm * thm * bool
     val nmul : term -> term -> thm
     val ndiv : term -> term -> thm
+
+    val print_stats : unit -> unit
+    val reset_stats : unit -> unit
+    val reset_cache : unit -> unit
+    val nat_tm_hash : term -> string
 end;;
 
 (* Dependencies *)
@@ -1372,37 +1377,163 @@ let ndiv =
 		     m_tm, m_var_num; q_tm, q_var_num] div_uniq in
 	MY_PROVE_HYP th1 (MY_PROVE_HYP th2 th0);;
 
-(* TODO: cached arithmetic *)
+(* ------------------------------------------------------------------------- *)
+(* Cached arithmetic                                                         *)
+(* ------------------------------------------------------------------------- *)
+
+type stat_data = {
+  mutable counter : int;
+  table_size : unit -> int;
+};;
+
+let new_stat_data, stat_data =
+  let stats = ref [] in
+  let create_stat (name : string) table_size =
+    let data = { counter = 0; table_size = table_size } in
+    let _ = stats := (name, data) :: !stats in
+      data in
+    create_stat, (fun () -> !stats);;
+
+let reset_stats () =
+  let _ = map (fun (_, data) -> data.counter <- 0) (stat_data()) in
+    ();;
+
+let print_stats () =
+  let pp (name, data) =
+    sprintf "%s\t = %d\t (hash = %d)" name data.counter (data.table_size()) in
+  let strs = map pp (stat_data()) in
+    print_string (String.concat "\n" strs);;
+
+let le_table = Hashtbl.create !Arith_options.init_cache_size and
+    lt_table = Hashtbl.create !Arith_options.init_cache_size and
+    add_table = Hashtbl.create !Arith_options.init_cache_size and
+    sub_table = Hashtbl.create !Arith_options.init_cache_size and
+    sub_le_table = Hashtbl.create !Arith_options.init_cache_size and
+    mul_table = Hashtbl.create !Arith_options.init_cache_size and
+    div_table = Hashtbl.create !Arith_options.init_cache_size;;
+
+let le_data = new_stat_data "le" (fun () -> Hashtbl.length le_table) and
+    lt_data = new_stat_data "lt" (fun () -> Hashtbl.length lt_table) and
+    add_data = new_stat_data "add" (fun () -> Hashtbl.length add_table) and
+    sub_data = new_stat_data "sub" (fun () -> Hashtbl.length sub_table) and
+    sub_le_data = new_stat_data "sub_le" (fun () -> Hashtbl.length sub_le_table) and
+    mul_data = new_stat_data "mul" (fun () -> Hashtbl.length mul_table) and
+    div_data = new_stat_data "div" (fun () -> Hashtbl.length div_table);;
+
+let reset_cache () =
+  let clear = Hashtbl.clear in
+    clear le_table;
+    clear lt_table;
+    clear add_table;
+    clear sub_table;
+    clear sub_le_table;
+    clear mul_table;
+    clear div_table;;
+
+let add_to_cache t key v =
+  if Hashtbl.length t >= !Arith_options.max_cache_size then Hashtbl.clear t;
+  Hashtbl.add t key v;;
+
+let rec nat_tm_hash tm =
+  match tm with
+    | Const ("_0", _) -> ""
+    | Comb (Const (name, _), n_tm) ->
+	name ^ nat_tm_hash n_tm
+    | _ -> error "nat_tm_hash" [tm] [];;
+
+let nat_tm_hash2 tm1 tm2 =
+  nat_tm_hash tm1 ^ "x" ^ nat_tm_hash tm2;;
+
+let nle ltm rtm =
+  let _ = le_data.counter <- le_data.counter + 1 in
+    if !Arith_options.cached then
+      let hash = nat_tm_hash2 ltm rtm in
+	try
+	  Hashtbl.find le_table hash
+	with Not_found ->
+	  let result = nle ltm rtm in
+	  let _ = add_to_cache le_table hash result in
+	    result
+    else
+      nle ltm rtm;;
+
+let nlt ltm rtm =
+  let _ = lt_data.counter <- lt_data.counter + 1 in
+    if !Arith_options.cached then
+      let hash = nat_tm_hash2 ltm rtm in
+	try
+	  Hashtbl.find lt_table hash
+	with Not_found ->
+	  let result = nlt ltm rtm in
+	  let _ = add_to_cache lt_table hash result in
+	    result
+    else
+      nlt ltm rtm;;
+
+let nadd ltm rtm =
+  let _ = add_data.counter <- add_data.counter + 1 in
+    if !Arith_options.cached then
+      let hash = nat_tm_hash2 ltm rtm in
+	try
+	  Hashtbl.find add_table hash
+	with Not_found ->
+	  let result = nadd ltm rtm in
+	  let _ = add_to_cache add_table hash result in
+	    result
+    else
+      nadd ltm rtm;;
+
+let nsub ltm rtm =
+  let _ = sub_data.counter <- sub_data.counter + 1 in
+    if !Arith_options.cached then
+      let hash = nat_tm_hash2 ltm rtm in
+	try
+	  Hashtbl.find sub_table hash
+	with Not_found ->
+	  let result = nsub ltm rtm in
+	  let _ = add_to_cache sub_table hash result in
+	    result
+    else
+      nsub ltm rtm;;
+
+let nsub_le ltm rtm =
+  let _ = sub_le_data.counter <- sub_le_data.counter + 1 in
+    if !Arith_options.cached then
+      let hash = nat_tm_hash2 ltm rtm in
+	try
+	  Hashtbl.find sub_le_table hash
+	with Not_found ->
+	  let result = nsub_le ltm rtm in
+	  let _ = add_to_cache sub_le_table hash result in
+	    result
+    else
+      nsub_le ltm rtm;;
+
+let nmul ltm rtm =
+  let _ = mul_data.counter <- mul_data.counter + 1 in
+    if !Arith_options.cached then
+      let hash = nat_tm_hash2 ltm rtm in
+	try
+	  Hashtbl.find mul_table hash
+	with Not_found ->
+	  let result = nmul ltm rtm in
+	  let _ = add_to_cache mul_table hash result in
+	    result
+    else
+      nmul ltm rtm;;
+
+let ndiv ltm rtm =
+  let _ = div_data.counter <- div_data.counter + 1 in
+    if !Arith_options.cached then
+      let hash = nat_tm_hash2 ltm rtm in
+	try
+	  Hashtbl.find div_table hash
+	with Not_found ->
+	  let result = ndiv ltm rtm in
+	  let _ = add_to_cache div_table hash result in
+	    result
+    else
+      ndiv ltm rtm;;
 
 end;;
 
-(*
-
-(*********************)
-
-
-let tm = `D9 (D8 (D3 (D9 _0))) + D2 (D9 (D8 (D7 (D2 _0))))`;;
-let tm1 = `D9 (D8 (D3 (D9 _0)))` and
-    tm2 = `D2 (D9 (D8 (D7 (D2 _0))))`;;
-eval_add tm1 tm2;;
-nadd tm1 tm2;;
-
-test 10000 (eval_add tm1) tm2;;
-test 10000 (nadd tm1) tm2;;
-
-let mk_real_int64 i =
-  let n = num_of_big_int (Big_int.big_int_of_int64 i) in
-    rand (mk_nat n);;
-
-let mk_real_int = rand o mk_nat;;
-
-loadt "new_arith/arith_test_data27.hl";;
-
-let add_data = map (fun (a, b) -> mk_binary "+" (a, b)) data;;
-
-test 10 (fun d -> let _ = map raw_add_conv_hash d in ()) add_data;;
-(* 0.864 *)
-test 10 (fun d -> let _ = map (uncurry eval_add) d in ()) data;;
-test 10 (fun d -> let _ = map (uncurry nadd) d in ()) data;;
-
-*)

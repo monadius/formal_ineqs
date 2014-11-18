@@ -45,6 +45,7 @@ let unary_interval_operations =
   let table = Hashtbl.create 10 in
   let add = Hashtbl.add in
     add table `--` (fun pp -> float_interval_neg);
+    add table `abs` (fun pp -> float_interval_abs);
     add table `inv` float_interval_inv;
     add table `sqrt` float_interval_sqrt;
     add table `atn` float_interval_atn;

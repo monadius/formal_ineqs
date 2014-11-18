@@ -41,9 +41,11 @@ type verification_parameters =
   (* If true, then verification on internal subdomains can be skipped *)
   (* for a monotone function *)
   mono_pass_flag : bool;
-  (* If true, then raw interval arithmetic can be used *)
+  (* If true, then raw interval arithmetic can be used for values of a function *)
   (* (without Taylor approximations) *)
-  raw_intervals_flag : bool;
+  raw_intervals0 : bool;
+  (* If true, then raw interval arithmetic can be used for values of derivatives *)
+  raw_intervals1 : bool;
   (* If true, then an informal procedure is used to determine *)
   (* the optimal precision for the formal verification *)
   adaptive_precision : bool;
@@ -61,7 +63,8 @@ let default_params =
   allow_derivatives = true;
   convex_flag = false;
   mono_pass_flag = true;
-  raw_intervals_flag = true;
+  raw_intervals0 = true;
+  raw_intervals1 = true;
   adaptive_precision = true;
   eps = 0.0;
 
@@ -282,7 +285,7 @@ let rec mk_funs =
 (* Prepares verification functions *)
 (* fun_tm must be in the form `\x. f x` *)
 let mk_verification_functions =
-  let dummy_f pp lo hi = failwith "dummy f" and
+  let (* dummy_f pp lo hi = failwith "dummy f" and *)
       dummy_df i pp lo hi = failwith "dummy df" and
       dummy_ddf i j pp lo hi = failwith "dummy ddf" and
       dummy_diff2 lo hi = failwith "dummy diff2" in
@@ -293,13 +296,26 @@ let mk_verification_functions =
 	else
 	  let n = get_dim x_var in
 	  let eval_taylor, eval_ti = mk_funs n pp fun_tm in
-	  let _ = params := {!params with raw_intervals_flag = false; convex_flag = false} in
-	    {taylor = eval_taylor; 
-	     f = dummy_f; df = dummy_df; ddf = dummy_ddf; diff2_f = dummy_diff2},
-      {Informal_verifier.taylor = eval_ti;
-       Informal_verifier.f = dummy_f;
-       Informal_verifier.df = dummy_df;
-       Informal_verifier.ddf = dummy_ddf};;
+	  let eval0 = mk_eval_function pp fun_tm in
+	  let eval0_informal = Informal_taylor.mk_eval_function pp fun_tm in
+	  let _ = params := {
+	    !params with 
+	      raw_intervals1 = false; 
+	      convex_flag = false
+	  } in 
+	    {
+	      taylor = eval_taylor; 
+	      f = eval0; 
+	      df = dummy_df; 
+	      ddf = dummy_ddf; 
+	      diff2_f = dummy_diff2
+	    },
+      {
+	Informal_verifier.taylor = eval_ti;
+	Informal_verifier.f = eval0_informal;
+	Informal_verifier.df = dummy_df;
+	Informal_verifier.ddf = dummy_ddf
+      };;
 
    
 (********************************)
@@ -474,12 +490,13 @@ let verify_ineq0 params0 norm_flag pp ineq_tm var_names (lo_tm, hi_tm) rewrite_t
 	
       let _ = !info_print_level < 1 or (report0 "Constructing a solution certificate... "; true) in
       let opt0 = {
+	Informal_search.raw_intervals0 = !params.raw_intervals0;
 	Informal_search.max_width = 1e-10;
 	Informal_search.max_depth = 200;
 	Informal_search.pp = pp;
 	Informal_search.mono_depth = 200;
       } in
-      let fs_inf = map (fun f -> f.Informal_verifier.taylor) [ti] in
+      let fs_inf = map (fun f -> f.Informal_verifier.f, f.Informal_verifier.taylor) [ti] in
       let dom_inf = Informal_taylor.mk_m_center_domain pp xx2 zz2 in
       let certificate = Informal_search.construct_certificate opt0 dom_inf fs_inf in
 
@@ -583,15 +600,15 @@ let verify_disj_ineq0 params0 norm_flag pp ineq_tm var_names (lo_tm, hi_tm) rewr
       let eval_fs_list, ti_list = unzip (map (mk_verification_functions params pp) fun_tms) in
       let _ = !info_print_level < 1 or (report0 "Constructing a solution certificate... "; true) in
       let opt0 = {
+	Informal_search.raw_intervals0 = !params.raw_intervals0;
 	Informal_search.max_width = 1e-10;
 	Informal_search.max_depth = 200;
 	Informal_search.pp = pp;
 	Informal_search.mono_depth = 0;
       } in
-      let fs_inf = map (fun f -> f.Informal_verifier.taylor) ti_list in
+      let fs_inf = map (fun f -> f.Informal_verifier.f, f.Informal_verifier.taylor) ti_list in
       let dom_inf = Informal_taylor.mk_m_center_domain pp xx2 zz2 in
       let certificate = Informal_search.construct_certificate opt0 dom_inf fs_inf in
-
 
       let stats = Certificate.result_stats certificate in
       let _ = !info_print_level < 1 or (report0 " done\n"; true) in

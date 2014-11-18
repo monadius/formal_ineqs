@@ -32,6 +32,7 @@ let unary_interval_operations =
   let table = Hashtbl.create 10 in
   let add = Hashtbl.add in
     add table "real_neg" (fun pp -> neg_interval);
+    add table "real_abs" (fun pp -> abs_interval);
     add table "real_inv" inv_interval;
     add table "sqrt" sqrt_interval;
     add table "cos" cos_interval;

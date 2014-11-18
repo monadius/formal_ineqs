@@ -4079,9 +4079,10 @@ let FLOAT_TO_NUM_CONV tm =
       let e_th = TRANS e_th' (NUM_TO_NUMERAL_CONV (mk_comb(Arith_num.num_const, e_tm))) in
       let th0 = MK_COMB (AP_TERM f_tm n_th, e_th) in
       let tm0 = rand(concl th0) in
-      let th1 = REWRITE_CONV[float; num_exp; REAL_MUL_LID; GSYM REAL_OF_NUM_MUL; GSYM REAL_OF_NUM_POW; min_exp_def] tm0 in
-      let th2 = REAL_RAT_REDUCE_CONV (rand(concl th1)) in
-	TRANS th0 (TRANS th1 th2);;
+      let th1 = (REWRITE_CONV[float_alt; arith_base_def; min_exp_def] THENC
+		   NUM_REDUCE_CONV THENC 
+		   REAL_RAT_REDUCE_CONV) tm0 in
+	TRANS th0 th1;;
 
 end;;
 

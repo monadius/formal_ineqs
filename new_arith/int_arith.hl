@@ -580,3 +580,45 @@ test 100000 (iadd tm1) tm2;;
 test 100000 (iadd itm1) tm2;;
 
 *)
+
+
+(*
+
+*********************)
+open Misc_functions;;
+open Nat_arith;;
+
+let tm = `D9 (D8 (D3 (D9 _0))) + D2 (D9 (D8 (D7 (D2 _0))))`;;
+let tm1 = `D9 (D8 (D3 (D9 _0)))` and
+    tm2 = `D2 (D9 (D8 (D7 (D2 _0))))`;;
+
+nadd tm1 tm2;;
+
+(* 2.703 *)
+test 100000 (nadd tm1) tm2;;
+
+
+let nadd' tm1 tm2 = 
+  if !Arith_options.cached then nadd tm1 tm2 else nsub tm1 tm2;;
+Arith_options.cached := false;;
+
+
+test 100000 (nadd tm1) tm2;;
+print_stats();;
+
+let mk_real_int64 i =
+  let n = num_of_big_int (Big_int.big_int_of_int64 i) in
+    rand (mk_nat n);;
+
+let mk_real_int = rand o mk_nat;;
+
+loadt "new_arith/arith_test_data27.hl";;
+
+let add_data = map (fun (a, b) -> mk_binary "+" (a, b)) data;;
+
+test 10 (fun d -> let _ = map raw_add_conv_hash d in ()) add_data;;
+(* 0.864 *)
+test 10 (fun d -> let _ = map (uncurry eval_add) d in ()) data;;
+test 10 (fun d -> let _ = map (uncurry nadd) d in ()) data;;
+
+*)

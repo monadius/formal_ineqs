@@ -101,7 +101,7 @@ let eval_m_taylor pp0 f_tm partials partials2 =
 	ddf = shape_list d2fs_vals 1};;
 
 
-(* mk_eval_functionq *)
+(* mk_eval_function *)
 let mk_eval_function pp0 f_tm =
   let build = eval_constants pp0 o build_interval_fun o snd o dest_abs in
   let f = build f_tm in

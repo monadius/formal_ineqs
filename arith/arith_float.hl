@@ -24,6 +24,10 @@ module type Arith_float_sig =
     val make_float : string -> term -> term -> term
     val mk_float : int -> int -> term
 
+    (* num_exp normalization/denormalization *)
+    val normalize : term -> thm * bool
+    val denormalize : term -> thm
+
     val float_lt0 : term -> thm
     val float_gt0 : term -> thm
     val float_lt : term -> term -> thm
@@ -143,7 +147,7 @@ let make_float =
 let mk_float =
   let float_const = `float_num` in
     fun n e ->
-      let n, s = if n < 0 then -n, `T` else n, `F` in
+      let n, s = if n < 0 then -n, t_const else n, f_const in
       let n_tm = rand (Arith_nat.mk_small_numeral_array n) in
       let e_tm = rand (Arith_nat.mk_small_numeral_array (e + Float_theory.min_exp)) in
 	mk_comb(mk_comb(mk_comb (float_const, s), n_tm), e_tm);;

@@ -6,6 +6,7 @@
 
 needs "arith/float_pow.hl";;
 needs "arith/more_float.hl";;
+needs "trig/exp_eval.hl";;
 needs "trig/atn_eval.hl";;
 needs "trig/asn_acs_eval.hl";;
 needs "trig/cos_eval.hl";;
@@ -20,6 +21,7 @@ open Misc_functions;;
 open Interval_arith;;
 open Arith_float;;
 open Float_pow;;
+open Exp_eval;;
 open Atn_eval;;
 open Asn_acs_eval;;
 open Cos_eval;;
@@ -48,6 +50,7 @@ let unary_interval_operations =
     add table `abs` (fun pp -> float_interval_abs);
     add table `inv` float_interval_inv;
     add table `sqrt` float_interval_sqrt;
+    add table `exp` float_interval_exp;
     add table `atn` float_interval_atn;
     add table `acs` float_interval_acs;
     add table `asn` float_interval_asn;

@@ -13,17 +13,28 @@ let abs_neg_one_pow = prove
    REWRITE_TAC[abs_neg_pow; REAL_ARITH `abs (&1) = &1`; REAL_POW_ONE]);;
 
 let real_infsum_offset = prove
-  (`!m k f. real_summable (from m) f /\ m < k 
-   ==> real_infsum (from m) f = sum (m..k - 1) f + real_infsum (from k) f`,
+  (`!m k f. real_summable (from m) f /\ m <= k 
+   ==> real_infsum (from m) f = sum (m..k) f + real_infsum (from (k + 1)) f`,
    REPEAT STRIP_TAC THEN
-     FIRST_ASSUM (MP_TAC o SPEC `k:num` o MATCH_MP REAL_SUMMABLE_FROM_ELSEWHERE) THEN
+     FIRST_ASSUM (MP_TAC o SPEC `k + 1` o MATCH_MP REAL_SUMMABLE_FROM_ELSEWHERE) THEN
      UNDISCH_TAC `real_summable (from m) f` THEN
      REWRITE_TAC[real_summable] THEN REPEAT STRIP_TAC THEN
      ASM_SIMP_TAC[REAL_INFSUM_UNIQUE] THEN
-     MP_TAC (SPECL[`f:num->real`; `l:real`; `m:num`; `k:num`] REAL_SUMS_OFFSET) THEN
-     ASM_REWRITE_TAC[] THEN
+     MP_TAC (SPECL[`f:num->real`; `l:real`; `m:num`; `k + 1`] REAL_SUMS_OFFSET) THEN
+     ASM_REWRITE_TAC[ARITH_RULE `m < k + 1 <=> m <= k`; ARITH_RULE `(k + 1) - 1 = k`] THEN
      DISCH_THEN (MP_TAC o MATCH_MP REAL_INFSUM_UNIQUE) THEN
      REAL_ARITH_TAC);;
+
+let real_infsum_offset_alt = prove
+  (`!m k f. real_summable (from m) f /\ m < k 
+   ==> real_infsum (from m) f = sum (m..k - 1) f + real_infsum (from k) f`,
+   REPEAT STRIP_TAC THEN
+     SUBGOAL_THEN `?t. k = t + 1 /\ m <= t` STRIP_ASSUME_TAC THENL [
+       EXISTS_TAC `k - 1` THEN ASM_ARITH_TAC;
+       ALL_TAC
+     ] THEN
+     ASM_REWRITE_TAC[ARITH_RULE `(t + 1) - 1 = t`] THEN
+     MATCH_MP_TAC real_infsum_offset THEN ASM_REWRITE_TAC[]);;
 
 let power_series_simple_bound = prove
   (`!a u x m. real_summable (from m) (\i. a i * x pow i)
@@ -69,7 +80,7 @@ let real_sums_simple_bound = prove
    REPEAT STRIP_TAC THEN
      FIRST_ASSUM (ASSUME_TAC o MATCH_MP REAL_SUMS_SUMMABLE) THEN
      FIRST_ASSUM (ASSUME_TAC o MATCH_MP REAL_INFSUM_UNIQUE) THEN
-     MP_TAC (SPECL[`n:num`; `m:num`; `\i. a i * x pow i`] real_infsum_offset) THEN
+     MP_TAC (SPECL[`n:num`; `m:num`; `\i. a i * x pow i`] real_infsum_offset_alt) THEN
      ASM_REWRITE_TAC[REAL_ARITH `a = s + r <=> a - s = r:real`] THEN
      DISCH_THEN (fun th -> REWRITE_TAC[th]) THEN
      MATCH_MP_TAC power_series_simple_bound THEN ASM_REWRITE_TAC[] THEN
@@ -87,7 +98,7 @@ let real_sums_simple_bound2 = prove
    REPEAT STRIP_TAC THEN
      FIRST_ASSUM (ASSUME_TAC o MATCH_MP REAL_SUMS_SUMMABLE) THEN
      FIRST_ASSUM (ASSUME_TAC o MATCH_MP REAL_INFSUM_UNIQUE) THEN
-     MP_TAC (SPECL[`n:num`; `m:num`; `\i. a i * x pow i`] real_infsum_offset) THEN
+     MP_TAC (SPECL[`n:num`; `m:num`; `\i. a i * x pow i`] real_infsum_offset_alt) THEN
      ASM_REWRITE_TAC[REAL_ARITH `a = s + r <=> a - s = r:real`] THEN
      DISCH_THEN (fun th -> REWRITE_TAC[th]) THEN
      MATCH_MP_TAC power_series_simple_bound2 THEN ASM_REWRITE_TAC[] THEN
@@ -258,7 +269,7 @@ let alt_sign_abs_bound = prove
      ((f ---> &0) sequentially)  /\ m < k
       ==> abs (real_infsum (from m) f - sum (m..k - 1) f) <= abs (f k)`,
    REPEAT GEN_TAC THEN DISCH_TAC THEN
-     MP_TAC (SPEC_ALL real_infsum_offset) THEN
+     MP_TAC (SPEC_ALL real_infsum_offset_alt) THEN
      MP_TAC (SPEC_ALL alt_sign_bound) THEN
      ASM_SIMP_TAC[alt_sign_summable] THEN
      REAL_ARITH_TAC);;
@@ -1155,6 +1166,28 @@ let real_sums_neg_xi = prove
      REWRITE_TAC[REAL_POW_MUL; REAL_POW_ONE; REAL_MUL_RID; REAL_ARITH `-- &1 * x = --x`] THEN
      REWRITE_TAC[real_pow; REAL_MUL_LID; REAL_ARITH `a - --b = a + b`; FROM_0]);;
 
+(* exp *)
+
+let exp_series = prove
+  (`!x. ((\k. &1 / &(FACT k) * x pow k) real_sums exp x) (:num)`,
+   GEN_TAC THEN REWRITE_TAC[REAL_SUMS] THEN
+     MP_TAC (SPECL[`Cx x`] CEXP_CONVERGES) THEN
+     REWRITE_TAC[GSYM CX_EXP] THEN
+     SUBGOAL_THEN `!n. Cx x pow n / Cx (&(FACT n)) = Cx (&1 / &(FACT n) * x pow n)` ASSUME_TAC THENL [
+       REWRITE_TAC[REAL_ARITH `&1 / a * b = b / a`; CX_DIV; CX_POW];
+       ALL_TAC
+     ] THEN
+     ASM_REWRITE_TAC[SERIES_CX_LIFT] THEN
+     SUBGOAL_THEN `lift o (\k. &1 / &(FACT k) * x pow k) = \k. lift (&1 / &(FACT k) * x pow k)` ASSUME_TAC THENL [
+       REWRITE_TAC[FUN_EQ_THM; o_THM];
+       ALL_TAC
+     ] THEN
+    ASM_REWRITE_TAC[FROM_0]);;
+
+let exp_infsum = prove
+  (`!x. real_infsum (from 0) (\k. &1 / &(FACT k) * x pow k) = exp x`,
+   GEN_TAC THEN MP_TAC (MATCH_MP REAL_INFSUM_UNIQUE (SPEC_ALL exp_series)) THEN
+     REWRITE_TAC[FROM_0]);;
 
 (* atn *)
 

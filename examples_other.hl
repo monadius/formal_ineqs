@@ -1,0 +1,24 @@
+needs "arith_options.hl";;
+
+(* Arith_options.base := 100;; *)
+
+needs "verifier/m_verifier_main.hl";;
+
+needs "verifier_options.hl";;
+Verifier_options.info_print_level := 2;;
+
+open M_verifier_main;;
+
+
+verify_ineq default_params 5 
+  `&0 <= x /\ x <= &1 ==> exp (x pow 3) < &3`;;
+
+verify_ineq default_params 5
+  `&1 <= x /\ x <= &3 /\ &1 <= y /\ y <= &10
+  ==> log (x pow 2 + y) < &3`;;
+
+(* MetiTarski home page *)
+verify_ineq default_params 5
+  `&0 <= x /\ x <= #1.46 / &10 pow 6 ==> 
+  (#64.42 * sin(#1.71 * &10 pow 6 * x) - #21.08 * cos(#1.71 * &10 pow 6 * x)) * exp(#9.05 * &10 pow 5 * x)
+  + #24.24 * exp(-- #1.86 * &10 pow 6 * x) > &0`;;

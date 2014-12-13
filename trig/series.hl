@@ -1189,6 +1189,37 @@ let exp_infsum = prove
    GEN_TAC THEN MP_TAC (MATCH_MP REAL_INFSUM_UNIQUE (SPEC_ALL exp_series)) THEN
      REWRITE_TAC[FROM_0]);;
 
+(* log *)
+
+let log_derivative_series = prove
+  (`!x. abs x < &1
+   ==> ((\k. (-- &1) pow k * x pow k) real_sums inv (&1 + x)) (:num)`,
+   REPEAT STRIP_TAC THEN
+     MP_TAC (SPECL[`0`; `-- &1 * x`] REAL_SUMS_GP) THEN
+     ASM_REWRITE_TAC[REAL_POW_MUL; real_pow; REAL_ARITH `abs (-- &1 * x) = abs x`] THEN
+     REWRITE_TAC[FROM_0; REAL_ARITH `a - -- &1 * x = a + x`; REAL_MUL_LID; real_div]);;
+
+let log_series = prove
+  (`!x. abs x < &1
+   ==> ((\k. (-- &1) pow k / &(k + 1) * x pow (k + 1)) real_sums log (&1 + x)) (:num)`,
+   REPEAT STRIP_TAC THEN
+     MP_TAC (SPECL[`\x. log (&1 + x)`; `\x. inv (&1 + x)`; `\k. (-- &1) pow k`; `(:num)`; `&1`]
+	       power_series_integral2) THEN
+     ANTS_TAC THEN REPEAT STRIP_TAC THEN REWRITE_TAC[] THENL [
+       REAL_DIFF_TAC THEN ASM_ARITH_TAC;
+       ASM_SIMP_TAC[log_derivative_series];
+       ALL_TAC
+     ] THEN
+     FIRST_X_ASSUM (MP_TAC o SPEC `x:real`) THEN ASM_REWRITE_TAC[] THEN
+     REWRITE_TAC[REAL_ADD_RID; LOG_1; REAL_SUB_RZERO] THEN
+     REWRITE_TAC[REAL_ARITH `a * x / b = a / b * x`]);;
+
+let log_infsum = prove
+  (`!x. abs x < &1 ==> 
+     real_infsum (from 0) (\k. ((-- &1) pow k / &(k + 1)) * x pow (k + 1)) = log (&1 + x)`,
+   GEN_TAC THEN DISCH_THEN (MP_TAC o MATCH_MP REAL_INFSUM_UNIQUE o MATCH_MP log_series) THEN
+     REWRITE_TAC[FROM_0]);;
+
 (* atn *)
 
 let atn_derivative_series = prove

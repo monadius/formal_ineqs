@@ -114,9 +114,6 @@ let exp_neg_high_raw =
 	else
 	  failwith "Informal.exp_neg_high_raw: bad x";;
 
-let inv_float_hi pp x =
-  div_float_hi pp float1 x;;
-
 let exp_low_raw pp x =
   let s = sign_float x in
     if not s then

@@ -24,7 +24,6 @@ open Poly;;
 open Poly_eval;;
 open Interval_arith;;
 open Float_theory;;
-open Num_exp_theory;;
 open Arith_nat;;
 open Arith_float;;
 open More_float;;

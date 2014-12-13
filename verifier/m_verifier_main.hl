@@ -28,7 +28,6 @@ open Misc_vars;;
 open Verifier_options;;
 
 
-
 (* Parameters *)
 type verification_parameters =
 {
@@ -192,6 +191,22 @@ let rec mk_funs =
     (fun p1 p2 x ->
        let a = ti1 p1 p2 x in
 	 Informal_taylor.eval_m_taylor_inv p1 p2 a) in
+    (* exp *)
+  let mk_exp n (f1, ti1) =
+    (fun p1 p2 x -> 
+       let a = f1 p1 p2 x in
+	 eval_m_taylor_exp2 n p1 p2 a),
+    (fun p1 p2 x ->
+       let a = ti1 p1 p2 x in
+	 Informal_taylor.eval_m_taylor_exp p1 p2 a) in
+    (* log *)
+  let mk_log n (f1, ti1) =
+    (fun p1 p2 x -> 
+       let a = f1 p1 p2 x in
+	 eval_m_taylor_log2 n p1 p2 a),
+    (fun p1 p2 x ->
+       let a = ti1 p1 p2 x in
+	 Informal_taylor.eval_m_taylor_log p1 p2 a) in
     (* atn *)
   let mk_atn n (f1, ti1) =
     (fun p1 p2 x -> 
@@ -250,6 +265,8 @@ let rec mk_funs =
   let unary_ops =
     ["real_neg", mk_neg;
      "sqrt", mk_sqrt;
+     "exp", mk_exp;
+     "log", mk_log;
      "atn", mk_atn;
      "cos", mk_cos;
      "sin", mk_sin;

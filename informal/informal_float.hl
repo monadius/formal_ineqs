@@ -27,6 +27,7 @@ module type Informal_float_sig =
     val make_float : bool -> Num.num -> int -> ifloat
     val num_of_ifloat : ifloat -> Num.num
     val float_of_ifloat : ifloat -> float
+    val ifloat_of_float : int -> float -> ifloat
     val sign_float : ifloat -> bool
       (* Compares representations, not numbers themselves *)
     val eq_float : ifloat -> ifloat -> bool
@@ -42,6 +43,8 @@ module type Informal_float_sig =
     val le_float : ifloat -> ifloat -> bool
     val min_float : ifloat -> ifloat -> ifloat
     val max_float : ifloat -> ifloat -> ifloat
+    val inv_float_lo : int -> ifloat -> ifloat
+    val inv_float_hi : int -> ifloat -> ifloat
     val mul_float_eq : ifloat -> ifloat -> ifloat
     val mul_float_lo : int -> ifloat -> ifloat -> ifloat
     val mul_float_hi : int -> ifloat -> ifloat -> ifloat
@@ -111,7 +114,45 @@ let float_of_ifloat f =
   let n = num_of_ifloat f in
   let a = approx_num_exp 30 n in
     float_of_string a;;
-    
+
+let ifloat_of_float =
+  let split =
+    let b = float_of_int arith_base in
+    let log_b = log b in
+    let rec fix t k =
+      if t = 0.0 or t = infinity or t = nan then
+	t, k
+      else if t < 1.0 then
+	fix (t *. b) (k - 1)
+      else if t >= b then
+	fix (t /. b) (k + 1)
+      else
+	t, k in
+      fun f ->
+	if f = 0.0 then
+	  false, f, 0
+	else
+	  let s, x = if f < 0.0 then true, -.f else false, f in
+	  let e = -.floor (log x /. log_b) in
+	  let k = -int_of_float e in
+	  let t, n = fix (x *. (b ** e)) k in
+	    s, t, n
+  and extract =
+    let b = float_of_int arith_base in
+    let nb = Int arith_base in
+    let rec step k f acc =
+      if k <= 0 then acc
+      else
+	let d = int_of_float f in
+	  step (k - 1) ((f -. float_of_int d) *. b) (Int d +/ (nb */ acc)) in
+      fun pp f ->
+	step pp f (Int 0)
+  in
+    fun pp f ->
+      let s, x, k = split f in
+      let n = extract pp x in
+	make_float s n (min_exp + k - pp + 1);;
+
 let sign_float ((s,_,_) : ifloat) = s;;
 
 let eq_float (s1,n1,e1) (s2,n2,e2) = s1 = s2 && eq_nat n1 n2 && e1 = e2;;
@@ -293,7 +334,6 @@ let div_float_lo pp (s1,n1,e1) (s2,n2,e2) =
       else
 	(s, n, e);;
 
-
 let div_float_hi pp (s1,n1,e1) (s2,n2,e2) =
   if eq0_nat n1 then
     float0
@@ -308,6 +348,14 @@ let div_float_hi pp (s1,n1,e1) (s2,n2,e2) =
 	failwith "div_float_hi: underflow"
       else
 	(s, n, e);;
+
+(* inv *)
+
+let inv_float_lo pp x =
+  div_float_lo pp float1 x;;
+
+let inv_float_hi pp x =
+  div_float_hi pp float1 x;;
 
 
 (* add *)

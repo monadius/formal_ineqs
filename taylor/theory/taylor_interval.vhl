@@ -200,6 +200,19 @@ rewrite -eq_ext => x /=.
 by apply: derivative_unique; rewrite HAS_REAL_DERIVATIVE_CONST.
 Qed.
 
+Lemma derivative_pow_x n : `derivative (\x. x pow n) = (\x. &n * x pow (n - 1))`.
+Proof.
+rewrite -eq_ext => x /=; apply: derivative_unique.
+rewrite -[`x pow (n - 1)`]REAL_MUL_RID HAS_REAL_DERIVATIVE_POW_ATREAL.
+by rewrite HAS_REAL_DERIVATIVE_ID.
+Qed.
+
+Lemma derivative_pow2_x : `derivative (\x. x pow 2) = (\x. &2 * x)`.
+Proof. by rewrite derivative_pow_x "ARITH_RULE `2 - 1 = 1`" REAL_POW_1. Qed.
+
+Lemma derivative_pow3_x : `derivative (\x. x pow 3) = (\x. &3 * x pow 2)`.
+Proof. by rewrite derivative_pow_x "ARITH_RULE `3 - 1 = 2`". Qed.
+
 Lemma derivative_inv x : `~(x = &0) ==> derivative inv x = -- inv (x * x)`.
 move => xn0.
 by apply: derivative_unique; rewrite -REAL_POW_2 HAS_REAL_DERIVATIVE_INV_BASIC.
@@ -284,6 +297,22 @@ Qed.
 Variable f : `:real->real`.
 Variable x : `:real`.
 Hypothesis df : `f real_differentiable atreal x`.
+
+Lemma derivative_compose_pow n : `(\x. (f x) pow n) real_differentiable atreal x /\
+	derivative (\x. (f x) pow n) x = &n * (f x) pow (n - 1) * derivative f x`.
+Proof.
+split; first by rewrite REAL_DIFFERENTIABLE_POW_ATREAL.
+apply: derivative_unique; rewrite HAS_REAL_DERIVATIVE_POW_ATREAL.
+by rewrite has_derivative_alt.
+Qed.
+
+Lemma derivative_compose_pow2 : `(\x. (f x) pow 2) real_differentiable atreal x /\
+	derivative (\x. (f x) pow 2) x = &2 * f x * derivative f x`.
+Proof. by rewrite !derivative_compose_pow andTb "ARITH_RULE `2 - 1 = 1`" REAL_POW_1. Qed.
+
+Lemma derivative_compose_pow3 : `(\x. (f x) pow 3) real_differentiable atreal x /\
+	derivative (\x. (f x) pow 3) x = &3 * (f x pow 2) * derivative f x`.
+Proof. by rewrite !derivative_compose_pow andTb "ARITH_RULE `3 - 1 = 2`". Qed.
 
 Lemma derivative_compose_atn : `(\x. atn (f x)) real_differentiable atreal x /\
 	derivative (\x. atn (f x)) x = derivative f x / (&1 + f x * f x)`.
@@ -1364,7 +1393,46 @@ rewrite lin_approx_eq derivative_composition // dfg_int /= f_int // andbT.
 by rewrite -(o_THM f); rewr ETA_AX; exact: REAL_DIFFERENTIABLE_COMPOSE_ATREAL.
 Qed.
 
+(* pow *)
 
+Lemma pow_x_has_real_derivative n x :
+	`((\x. x pow n) has_real_derivative &n * x pow (n - 1)) (atreal x)`.
+Proof.
+rewrite -[`x pow (n - 1)`]REAL_MUL_RID HAS_REAL_DERIVATIVE_POW_ATREAL.
+by rewrite HAS_REAL_DERIVATIVE_ID.
+Qed.
+
+Lemma second_derivative_pow_x n : 
+	`derivative (derivative (\x. x pow n)) = (\x. &(n * (n - 1)) * x pow (n - 2))`.
+Proof.
+rewrite derivative_pow_x -eq_ext => x /=; apply: derivative_unique.
+rewrite -REAL_OF_NUM_MUL -REAL_MUL_ASSOC HAS_REAL_DERIVATIVE_LMUL_ATREAL.
+by rewrite "ARITH_RULE `n - 2 = (n - 1) - 1`" pow_x_has_real_derivative.
+Qed.
+
+Lemma diff2_pow_x n x : `nth_diff_strong 2 (\x. x pow n) x`.
+Proof.
+rewrite nth_diff_strong2_eq_alt; exists `(:real)`.
+rewrite IN_UNIV REAL_OPEN_UNIV !andTb IN_UNIV => y /=.
+rewrite derivative_pow_x /= pow_x_has_real_derivative andTb.
+rewrite nth_derivative2 second_derivative_pow_x.
+rewrite -REAL_OF_NUM_MUL -REAL_MUL_ASSOC /= HAS_REAL_DERIVATIVE_LMUL_ATREAL.
+by rewrite "ARITH_RULE `n - 2 = (n - 1) - 1`" pow_x_has_real_derivative.
+Qed.
+
+Lemma second_derivative_pow2_x :
+	`derivative (derivative (\x. x pow 2)) = (\x. &2)`.
+Proof.
+rewrite second_derivative_pow_x subnn real_pow "ARITH_RULE `2 * (2 - 1) = 2`".
+by rewrite REAL_MUL_RID.
+Qed.
+
+Lemma second_derivative_pow3_x :
+	`derivative (derivative (\x. x pow 3)) = (\x. &6 * x)`.
+Proof.
+rewrite second_derivative_pow_x !"ARITH_RULE `3 * (3 - 1) = 6 /\ 3 - 2 = 1`".
+by rewrite REAL_POW_1.
+Qed.
 
 (* atn *)
 
@@ -1794,7 +1862,38 @@ Variable f : `:real->real`.
 Variable x : `:real`.
 Hypothesis df : `nth_diff_strong 2 f x`.
 
+(* pow *)
+
+Lemma second_derivative_compose_pow n :
+	`nth_derivative 2 (\x. f x pow n) x =
+		 &n * (nth_derivative 2 f x * f x pow (n - 1) 
+	   	 + &(n - 1) * f x pow (n - 2) * derivative f x pow 2)`.
+Proof.
+set g := `\x. x pow n`.
+have ->: `(\x. f x pow n) = (\x. g (f x))` by rewrite -g_def.
+rewrite second_derivative_compose -g_def ?diff2_pow_x //.
+rewrite nth_derivative2 second_derivative_pow_x derivative_pow_x /=.
+by rewrite -REAL_OF_NUM_MUL; arith.
+Qed.
+
+Lemma second_derivative_compose_pow2 :
+	`nth_derivative 2 (\x. f x pow 2) x =
+		 &2 * (nth_derivative 2 f x * f x + derivative f x pow 2)`.
+Proof.
+rewrite second_derivative_compose_pow "ARITH_RULE `2 - 1 = 1`" subnn.
+by rewrite REAL_POW_1 "GEN_ALL real_pow"; arith.
+Qed.
+
+Lemma second_derivative_compose_pow3 :
+	`nth_derivative 2 (\x. f x pow 3) x =
+		 &3 * (nth_derivative 2 f x * f x pow 2 + &2 * f x * derivative f x pow 2)`.
+Proof.
+rewrite second_derivative_compose_pow !"ARITH_RULE `3 - 1 = 2 /\ 3 - 2 = 1`".
+by rewrite REAL_POW_1; arith.
+Qed.
+
 (* atn *)
+
 Lemma second_derivative_compose_atn : 
 	`nth_derivative 2 (\x. atn (f x)) x = 
 	(nth_derivative 2 f x * (&1 + f x * f x) - &2 * f x * derivative f x pow 2) / (&1 + f x * f x) pow 2`.
@@ -1929,6 +2028,13 @@ rewrite second_derivative_compose ?diff2_matan // second_derivative_matan // der
 by arith.
 Qed.
 
+(* pow *)
+Lemma diff2_compose_pow n : `nth_diff_strong 2 (\x. f x pow n) x`.
+Proof.
+set g := `\x. x pow n`.
+have ->: `(\x. f x pow n) = (\x. g (f x))` by rewrite -g_def.
+by rewrite diff2_compose -g_def diff2_pow_x.
+Qed.
 
 (* atn *)
 Lemma diff2_compose_atn : `nth_diff_strong 2 (\x. atn (f x)) x`.
@@ -2086,6 +2192,65 @@ rewrite has_bounded_second_derivative !bounded_on_int !nth_diff_strong_int /=.
 move => dg g_bounded df bounded; split => x ineq.
   by rewrite diff2_compose dg // df // g_bounded.
 by rewrite second_derivative_compose ?dg ?df ?g_bounded // bounded.
+Qed.
+
+(* pow *)
+
+Lemma second_derivative_pow_bounds n dd_bounds : 
+	`bounded_on_int (\x. &(n * (n - 1)) * x pow (n - 2)) int dd_bounds ==>
+	has_bounded_second_derivative (\x. x pow n) int dd_bounds`.
+Proof.
+rewrite bounded_on_int has_bounded_second_derivative => ineq.
+split; last by rewrite nth_derivative2 second_derivative_pow_x bounded_on_int.
+by rewrite nth_diff_strong_int diff2_pow_x.
+Qed.
+
+Lemma second_derivative_compose_pow_bounds n f dd_bounds :
+	`nth_diff_strong_int 2 int f ==>
+	bounded_on_int (\x. &n * (nth_derivative 2 f x * f x pow (n - 1) +
+			&(n - 1) * f x pow (n - 2) * derivative f x pow 2)) int dd_bounds ==>
+	has_bounded_second_derivative (\x. f x pow n) int dd_bounds`.
+Proof.
+rewrite has_bounded_second_derivative !bounded_on_int 
+	!nth_diff_strong_int /= => df bounded; split => x ineq.
+  by rewrite diff2_compose_pow df.
+by rewrite second_derivative_compose_pow ?df // bounded.
+Qed.
+
+Lemma second_derivative_pow2_bounds dd_bounds : 
+	`bounded_on_int (\x. &2) int dd_bounds ==>
+	has_bounded_second_derivative (\x. x pow 2) int dd_bounds`.
+Proof.
+move => bounded; rewrite second_derivative_pow_bounds // subnn real_pow.
+by rewrite "ARITH_RULE `2 * (2 - 1) = 2`" REAL_MUL_RID.
+Qed.
+
+Lemma second_derivative_compose_pow2_bounds f dd_bounds :
+	`nth_diff_strong_int 2 int f ==>
+	bounded_on_int (\x. &2 * (nth_derivative 2 f x * f x +
+				derivative f x pow 2)) int dd_bounds ==>
+	has_bounded_second_derivative (\x. f x pow 2) int dd_bounds`.
+Proof.
+move => df bounded; rewrite second_derivative_compose_pow_bounds df andTb.
+by rewrite "ARITH_RULE `2 - 1 = 1`" subnn "GEN_ALL real_pow" !REAL_MUL_LID REAL_POW_1.
+Qed.
+
+Lemma second_derivative_pow3_bounds dd_bounds : 
+	`bounded_on_int (\x. &6 * x) int dd_bounds ==>
+	has_bounded_second_derivative (\x. x pow 3) int dd_bounds`.
+Proof.
+move => bounded; rewrite second_derivative_pow_bounds //.
+by rewrite !"ARITH_RULE `3 * (3 - 1) = 6 /\ 3 - 2 = 1`" REAL_POW_1.
+Qed.
+
+Lemma second_derivative_compose_pow3_bounds f dd_bounds :
+	`nth_diff_strong_int 2 int f ==>
+	bounded_on_int (\x. &3 * (nth_derivative 2 f x * f x pow 2 +
+				&2 * f x * derivative f x pow 2)) int dd_bounds ==>
+	has_bounded_second_derivative (\x. f x pow 3) int dd_bounds`.
+Proof.
+move => df bounded; rewrite second_derivative_compose_pow_bounds df andTb.
+by rewrite !"ARITH_RULE `3 - 1 = 2 /\ 3 - 2 = 1`" REAL_POW_1.
 Qed.
 
 (* atn *)

@@ -67,7 +67,6 @@ let gen_taylor_arith_thm arith_th final_rule n =
     (UNDISCH_ALL o final_rule o REWRITE_RULE[GSYM CONJ_ASSOC] o 
        NUMERALS_TO_NUM o PURE_REWRITE_RULE[FLOAT_OF_NUM; min_exp_def]) th2;;
 
-
 let gen_add_thm = gen_taylor_arith_thm MK_M_TAYLOR_ADD' (CONV_RULE ALL_CONV);;
 let gen_sub_thm = gen_taylor_arith_thm MK_M_TAYLOR_SUB' (CONV_RULE ALL_CONV);;
 let gen_mul_thm = gen_taylor_arith_thm MK_M_TAYLOR_MUL' (CONV_RULE ALL_CONV);;

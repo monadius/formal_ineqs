@@ -167,6 +167,16 @@ let rec mk_funs =
        let a = ti1 p1 p2 x and
 	   b = ti2 p1 p2 x in
 	 Informal_taylor.eval_m_taylor_mul p1 p2 a b) in
+    (* pow *)
+  let mk_pow n (f1, ti1) k =
+    let eval_pow = M_taylor_arith.eval_m_taylor_pow k and
+	ieval_pow = Informal_taylor.eval_m_taylor_pow k in
+      (fun p1 p2 x ->
+	 let a = f1 p1 p2 x in
+	   eval_pow n p1 p2 a),
+      (fun p1 p2 x ->
+	 let a = ti1 p1 p2 x in
+	   ieval_pow p1 p2 a) in
     (* neg *)
   let mk_neg n (f1, ti1) =
     (fun p1 p2 x -> 
@@ -278,10 +288,16 @@ let rec mk_funs =
   let mk_bin n pp x_var tm =
     let lhs, rhs = dest_comb tm in
     let op, lhs = dest_comb lhs in
-    let mk_f = assoc ((fst o dest_const) op) bin_ops in
-    let l_funs = mk_funs n pp (mk_abs(x_var, lhs)) and
-	r_funs = mk_funs n pp (mk_abs(x_var, rhs)) in
-      mk_f n l_funs r_funs in
+    let name = fst (dest_const op) in
+      if name = "real_pow" then
+	let l_funs = mk_funs n pp (mk_abs (x_var, lhs)) in
+	let k = dest_small_numeral rhs in
+	  mk_pow n l_funs k
+      else
+	let mk_f = assoc name bin_ops in
+	let l_funs = mk_funs n pp (mk_abs (x_var, lhs)) and
+	    r_funs = mk_funs n pp (mk_abs (x_var, rhs)) in
+	  mk_f n l_funs r_funs in
     (* makes an unary operation *)
   let mk_unary n pp x_var tm =
     let op, rhs = dest_comb tm in
@@ -664,7 +680,7 @@ let verify_ineq_and_rewrite rewrite_thms params pp ineq_tm =
     verify_disj_ineq0 params true pp ineq vars bounds rewrite_thms;;
 
 (* The simplest verification function *)
-let verify_ineq = verify_ineq_and_rewrite [];;
+let verify_ineq = verify_ineq_and_rewrite [REAL_POW_1; real_pow];;
 
 end;;
 

@@ -274,6 +274,74 @@ let eval_m_taylor_neg taylor1 =
       ddf = map (map neg) taylor1.ddf;
     };;
 
+(* pow2 *)
+let eval_m_taylor_pow2 p_lin p_second ti =
+  let n = ti.n in
+  let ns = 1--n in
+  let f1_bound = eval_m_taylor_bound p_second ti in
+  let bounds = pow_interval p_lin 2 ti.f in
+  let u_bounds =
+    let ( * ) = mul_interval p_lin in
+      two_interval * ti.f in
+  let df =
+    let ( * ) = mul_interval p_lin in
+      map (fun d -> u_bounds * d) ti.df in
+  let d1_bounds = map (fun i -> eval_m_taylor_partial_bound p_second i ti) ns in
+  let d1, d2 =
+    let ( * ) = mul_interval p_second in
+      two_interval * f1_bound, two_interval in
+  let ddf = 
+    let ( * ), ( + ) = mul_interval p_second, add_interval p_second in
+      map2 (fun dd_list di1 ->
+	      my_map2 (fun dd dj1 ->
+			 (d2 * dj1) * di1 + d1 * dd) dd_list d1_bounds) ti.ddf d1_bounds in
+    {
+      n = n;
+      domain = ti.domain;
+      f = bounds;
+      df = df;
+      ddf = ddf;
+    };;
+
+(* pow *)
+let eval_m_taylor_pow k =
+  if k <= 1 then failwith "Informal.eval_m_taylor_pow: k <= 1"
+  else if k = 2 then eval_m_taylor_pow2
+  else
+    let k_interval = mk_small_num_interval k in
+    let kk1_interval = mk_small_num_interval (k * (k - 1)) in
+      fun p_lin p_second ti ->
+	let n = ti.n in
+	let ns = 1--n in
+	let f1_bound = eval_m_taylor_bound p_second ti in
+	let bounds = pow_interval p_lin k ti.f in
+	let u_bounds =
+	  let ( * ) = mul_interval p_lin in
+	  let pow = pow_interval p_lin (k - 1) in
+	    k_interval * pow ti.f in
+	let df =
+	  let ( * ) = mul_interval p_lin in
+	    map (fun d -> u_bounds * d) ti.df in
+	let d1_bounds = map (fun i -> eval_m_taylor_partial_bound p_second i ti) ns in
+	let d1, d2 =
+	  let ( * ) = mul_interval p_second in
+	  let pow_k1 = pow_interval p_second (k - 1) in
+	  let pow_k2 = pow_interval p_second (k - 2) in
+	    k_interval * pow_k1 f1_bound,
+	    kk1_interval * pow_k2 f1_bound in
+	let ddf = 
+	  let ( * ), ( + ) = mul_interval p_second, add_interval p_second in
+	    map2 (fun dd_list di1 ->
+		    my_map2 (fun dd dj1 ->
+			       (d2 * dj1) * di1 + d1 * dd) dd_list d1_bounds) ti.ddf d1_bounds in
+	  {
+	    n = n;
+	    domain = ti.domain;
+	    f = bounds;
+	    df = df;
+	    ddf = ddf;
+	  };;
+
 (* inv *)
 let eval_m_taylor_inv p_lin p_second ti =
   let n = ti.n in

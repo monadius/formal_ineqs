@@ -69,7 +69,7 @@ let fnum_type = `:num->num` and
     max_const = mk_small_numeral maximum;;
 
 (* Names of constants which define "digits" *)
-let names_array = Array.init maximum (fun i -> "D"^(string_of_int i));;
+let names_array = Array.init maximum (fun i -> "N"^(string_of_int i));;
 
 (* |- D_i(n) = i + D_0(n) *)
 let mk_bit_definition i =

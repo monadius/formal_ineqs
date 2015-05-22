@@ -11,6 +11,8 @@ needs "arith/float_theory.hl";;
 needs "arith/interval_arith.hl";;
 needs "misc/misc_vars.hl";;
 
+needs "tests/log.hl";;
+
 (* FLOOR_DIV_DIV *)
 needs "Library/floor.ml";;
 (* sqrt and its properties *)
@@ -57,6 +59,7 @@ module type Arith_float_sig =
     val float_prove_gt_interval : term -> thm -> bool * thm
     val float_compare_interval : term -> thm -> int * thm
 
+    val init_logs : unit -> unit
     val reset_stat : unit -> unit
     val reset_cache : unit -> unit
     val print_stat : unit -> unit
@@ -2389,6 +2392,31 @@ end;; (* Float_ops module *)
 (* Cached floating point operations *)
 (************************************)
 
+let init_logs () =
+  if !Arith_options.float_log then
+    begin
+      Log.open_log "mul_lo";
+      Log.open_log "mul_hi";
+      Log.open_log "div_lo";
+      Log.open_log "div_hi";
+      Log.open_log "add_lo";
+      Log.open_log "add_hi";
+      Log.open_log "sub_lo";
+      Log.open_log "sub_hi"
+    end;;
+
+let float_to_log_string tm =
+  let s, n_tm, e_tm = dest_float tm in
+  let n = (if s = "T" then minus_num else I) (raw_dest_hash n_tm) in
+  let e = raw_dest_hash e_tm -/ Int Float_theory.min_exp in
+    string_of_num n ^ "," ^ string_of_num e;;
+
+let log_binop name pp tm1 tm2 =
+  let str1 = float_to_log_string tm1 and
+      str2 = float_to_log_string tm2 in
+  let str = string_of_int pp ^ ":" ^ str1 ^ ";" ^ str2 in
+    Log.append_to_log name str;;
+    
 (* Counters for collecting stats *)
 let lt0_c = ref 0 and
     gt0_c = ref 0 and
@@ -2596,9 +2624,15 @@ let float_mul_lo =
 	with Not_found ->
 	  let result = Float_ops.float_mul_lo pp tm1 tm2 in
 	  let _ = my_add mul_table hash result in
+	  let _ = if !Arith_options.float_log then log_binop "mul_lo" pp tm1 tm2 in
 	    result
   else
-    Float_ops.float_mul_lo;;
+    if !Arith_options.float_log then
+      fun pp tm1 tm2 ->
+	let _ = log_binop "mul_lo" pp tm1 tm2 in
+	  Float_ops.float_mul_lo pp tm1 tm2
+    else
+      Float_ops.float_mul_lo;;
 
 (* mul_hi *)
 let float_mul_hi =
@@ -2611,9 +2645,15 @@ let float_mul_hi =
 	with Not_found ->
 	  let result = Float_ops.float_mul_hi pp tm1 tm2 in
 	  let _ = my_add mul_table hash result in
+	  let _ = if !Arith_options.float_log then log_binop "mul_hi" pp tm1 tm2 in
 	    result
   else
-    Float_ops.float_mul_hi;;
+    if !Arith_options.float_log then
+      fun pp tm1 tm2 ->
+	let _ = log_binop "mul_hi" pp tm1 tm2 in
+	  Float_ops.float_mul_hi pp tm1 tm2
+    else
+      Float_ops.float_mul_hi;;
 
 (* div_lo *)
 let float_div_lo =
@@ -2626,9 +2666,15 @@ let float_div_lo =
 	with Not_found ->
 	  let result = Float_ops.float_div_lo pp tm1 tm2 in
 	  let _ = my_add div_table hash result in
+	  let _ = if !Arith_options.float_log then log_binop "div_lo" pp tm1 tm2 in
 	    result
   else
-    Float_ops.float_div_lo;;
+    if !Arith_options.float_log then
+      fun pp tm1 tm2 ->
+	let _ = log_binop "div_lo" pp tm1 tm2 in
+	  Float_ops.float_div_lo pp tm1 tm2
+    else
+      Float_ops.float_div_lo;;
 
 (* div_hi *)
 let float_div_hi =
@@ -2641,9 +2687,15 @@ let float_div_hi =
 	with Not_found ->
 	  let result = Float_ops.float_div_hi pp tm1 tm2 in
 	  let _ = my_add div_table hash result in
+	  let _ = if !Arith_options.float_log then log_binop "div_hi" pp tm1 tm2 in
 	    result
   else
-    Float_ops.float_div_hi;;
+    if !Arith_options.float_log then
+      fun pp tm1 tm2 ->
+	let _ = log_binop "div_hi" pp tm1 tm2 in
+	  Float_ops.float_div_hi pp tm1 tm2
+    else
+      Float_ops.float_div_hi;;
 
 (* add_lo *)
 let float_add_lo =
@@ -2656,9 +2708,15 @@ let float_add_lo =
 	with Not_found ->
 	  let result = Float_ops.float_add_lo pp tm1 tm2 in
 	  let _ = my_add add_table hash result in
+	  let _ = if !Arith_options.float_log then log_binop "add_lo" pp tm1 tm2 in
 	    result
   else
-    Float_ops.float_add_lo;;
+    if !Arith_options.float_log then
+      fun pp tm1 tm2 ->
+	let _ = log_binop "add_lo" pp tm1 tm2 in
+	  Float_ops.float_add_lo pp tm1 tm2
+    else
+      Float_ops.float_add_lo;;
 
 (* add_hi *)
 let float_add_hi =
@@ -2671,9 +2729,15 @@ let float_add_hi =
 	with Not_found ->
 	  let result = Float_ops.float_add_hi pp tm1 tm2 in
 	  let _ = my_add add_table hash result in
+	  let _ = if !Arith_options.float_log then log_binop "add_hi" pp tm1 tm2 in
 	    result
   else
-    Float_ops.float_add_hi;;
+    if !Arith_options.float_log then
+      fun pp tm1 tm2 ->
+	let _ = log_binop "add_hi" pp tm1 tm2 in
+	  Float_ops.float_add_hi pp tm1 tm2
+    else
+      Float_ops.float_add_hi;;
 
 (* sub_lo *)
 let float_sub_lo =
@@ -2686,9 +2750,15 @@ let float_sub_lo =
 	with Not_found ->
 	  let result = Float_ops.float_sub_lo pp tm1 tm2 in
 	  let _ = my_add sub_table hash result in
+	  let _ = if !Arith_options.float_log then log_binop "sub_lo" pp tm1 tm2 in
 	    result
   else
-    Float_ops.float_sub_lo;;
+    if !Arith_options.float_log then
+      fun pp tm1 tm2 ->
+	let _ = log_binop "sub_lo" pp tm1 tm2 in
+	  Float_ops.float_sub_lo pp tm1 tm2
+    else
+      Float_ops.float_sub_lo;;
 
 (* sub_hi *)
 let float_sub_hi =
@@ -2701,9 +2771,15 @@ let float_sub_hi =
 	with Not_found ->
 	  let result = Float_ops.float_sub_hi pp tm1 tm2 in
 	  let _ = my_add sub_table hash result in
+	  let _ = if !Arith_options.float_log then log_binop "sub_hi" pp tm1 tm2 in
 	    result
   else
-    Float_ops.float_sub_hi;;
+    if !Arith_options.float_log then
+      fun pp tm1 tm2 ->
+	let _ = log_binop "sub_hi" pp tm1 tm2 in
+	  Float_ops.float_sub_hi pp tm1 tm2
+    else
+      Float_ops.float_sub_hi;;
 
 (* sqrt_lo *)
 let float_sqrt_lo =

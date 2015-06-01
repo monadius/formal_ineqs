@@ -1,0 +1,632 @@
+needs "lib/ipow.hl";;
+needs "new_arith/int_arith.hl";;
+needs "tests/test_utils.hl";;
+
+open Nat_arith;;
+open Int_arith;;
+open Ipow;;
+open Misc_vars;;
+open Misc_functions;;
+
+prioritize_real();;
+
+let r_var_int = `r : int` and
+    e_var_int = `e : int` and
+    e1_var_int = `e1 : int` and
+    e2_var_int = `e2 : int`;;
+
+let nexp = new_definition
+  `!n e. nexp n e = n * (base_const EXP e)`;;
+
+let fp = new_definition
+  `!s m e. fp s m e = (if s then (-- &1) else &1) * &m * (&base_const ipow e)`;;
+
+let fp_const = `fp`;;
+
+let zero_num = new_definition `zero_num = 0`;;
+
+let mk_bool_term b =
+  if b then t_const else f_const;;
+
+let dest_nexp_term tm =
+  match tm with
+    | Comb (Comb (Const ("nexp", _), n_tm), e_tm) -> n_tm, e_tm
+    | _ -> error "dest_nexp_term" [tm] [];;
+
+let mk_fp_term (s, m_tm, e_tm) =
+  let s_tm = if s then t_const else f_const in
+    mk_comb (mk_comb (mk_comb (fp_const, s_tm), m_tm), e_tm);;
+
+let dest_fp_term tm =
+  match tm with
+    | Comb (Comb (Comb (Const ("fp", _), Const (s, _)), m_tm), e_tm) ->
+	(if s = "T" then true else false), m_tm, e_tm
+    | _ -> error "dest_fp_term" [tm] [];;
+
+let mk_fp (m, e) =
+  let s_tm, m = 
+    if sign_num m < 0 then t_const, abs_num m else f_const, m in
+  let m_tm = mk_nat m in
+  let e_tm = mk_int e in
+    mk_comb (mk_comb (mk_comb (fp_const, s_tm), m_tm), e_tm);;
+
+let mk_small_fp (m, e) =
+  let s_tm, m = 
+    if m < 0 then t_const, -m else f_const, m in
+  let m_tm = mk_small_nat m in
+  let e_tm = mk_small_int e in
+    mk_comb (mk_comb (mk_comb (fp_const, s_tm), m_tm), e_tm);;
+
+let dest_fp tm =
+  let s, m_tm, e_tm = dest_fp_term tm in
+  let m = dest_nat m_tm in
+  let e = dest_int e_tm in
+    (if s then minus_num m else m), e;;
+
+(*****************)
+
+let th_rule = UNDISCH_ALL o PURE_REWRITE_RULE[GSYM IMP_IMP] o SPEC_ALL;;
+
+let th_num_rule = th_rule o PURE_REWRITE_RULE[zero_num] o REPLACE_NUMERALS;;
+
+let base_const_not_zero = prove
+  (`~(&base_const = &0)`,
+   REWRITE_TAC[base_const; ARITH; REAL_OF_NUM_EQ]);;
+
+let ipow_base_const_lt = prove
+  (`!e. &0 < &base_const ipow e`,
+   GEN_TAC THEN MATCH_MP_TAC IPOW_LT_0 THEN
+     REWRITE_TAC[base_const; REAL_OF_NUM_LT; ARITH]);;
+
+let ipow_base_const_le = prove
+  (`!e. &0 <= &base_const ipow e`,
+   SIMP_TAC[REAL_LT_IMP_LE; ipow_base_const_lt]);;
+
+let fp_nexp = prove
+  (`!s n k e. fp s (nexp n k) e = fp s n (pos_int k + e)`,
+   REWRITE_TAC[fp; nexp; GSYM REAL_OF_NUM_MUL; GSYM REAL_OF_NUM_POW; GSYM IPOW_NUM] THEN
+     SIMP_TAC[base_const_not_zero; pos_int; IPOW_ADD] THEN
+     REAL_ARITH_TAC);;
+
+let nexp_suc = prove
+  (`!n k. nexp n (SUC k) = base_const * nexp n k`,
+   REWRITE_TAC[nexp; EXP] THEN ARITH_TAC);;
+
+let nexp_exp0 = prove
+  (`!n. nexp n 0 = n`,
+   REWRITE_TAC[nexp; EXP; MULT_CLAUSES]);;
+
+let nexp0 = prove
+  (`!k. nexp 0 k = 0`,
+   REWRITE_TAC[nexp; MULT]);;
+   
+
+
+(*******************)
+
+let nexp_d0' = (th_rule o REWRITE_RULE[base_const; SYM def_array.(0)] o prove)
+  (`SUC k = r ==> nexp (base_const * n + 0) k = nexp n r`,
+   STRIP_TAC THEN REWRITE_TAC[nexp] THEN
+     POP_ASSUM (fun th -> REWRITE_TAC[SYM th; EXP]) THEN
+     ARITH_TAC);;
+
+let nexp0' = (th_num_rule o prove)
+  (`nexp 0 k = nexp 0 0`,
+   REWRITE_TAC[nexp0; nexp_exp0]);;
+
+
+(* Normalizes a given nexp term.                          *)
+(* Returns false, |- T if the term is already normalized. *)
+let nexp_normalize =
+  let name0 = name_array.(0) in
+  let rec normalize tm =
+    match tm with
+      | Comb (Comb (Const ("nexp", _), ltm), k_tm) ->
+	  begin
+	    match ltm with
+	      | Const ("_0", _) ->
+		  true, INST[k_tm, k_var_num] nexp0'
+	      | Comb (Const (n0, _), n_tm) when n0 = name0 ->
+		  let suc_th = nsuc k_tm in
+		  let r_tm = rand (concl suc_th) in
+		  let th0 = INST[n_tm, n_var_num; k_tm, k_var_num;
+				 r_tm, r_var_num] nexp_d0' in
+		  let th1 = MY_PROVE_HYP suc_th th0 in
+		  let flag, r_th = normalize (rand (concl th1)) in
+		    true, if flag then TRANS th1 r_th else th1
+	      | _ -> false, TRUTH
+	  end
+      | _ -> error "nexp_normalize" [tm] [] in
+    normalize;;
+
+
+(********************)
+
+let nexp_lo0' = (th_num_rule o prove)
+  (`nexp n 0 <= n`,
+   REWRITE_TAC[nexp_exp0; LE_REFL]);;
+
+let gen_nexp_lo =
+  let nexp_lo = (th_rule o prove)
+    (`nexp m k <= n /\ SUC k = r ==> nexp m r <= base_const * n + i`,
+     REPEAT STRIP_TAC THEN ONCE_REWRITE_TAC[ARITH_RULE `a <= b <=> a + 0 <= b`] THEN
+       MATCH_MP_TAC LE_ADD2 THEN REWRITE_TAC[LE_0] THEN
+       POP_ASSUM (fun th -> REWRITE_TAC[GSYM th]) THEN
+       ASM_REWRITE_TAC[nexp_suc; LE_MULT_LCANCEL]) in
+    fun i ->
+      let i_tm = mk_small_numeral i in
+      let th0 = INST[i_tm, i_var_num] nexp_lo in
+	PURE_REWRITE_RULE[base_const; SYM def_array.(i)] th0;;
+
+let gen_nexp_lo1 = 
+  let lo_thm = (th_num_rule o prove)
+    (`nexp n 1 <= base_const * n + i`,
+     REWRITE_TAC[ONE; nexp_suc; nexp_exp0] THEN ARITH_TAC) in
+    fun i ->
+      let i_tm = mk_small_numeral i in
+      let th0 = INST[i_tm, i_var_num] lo_thm in
+	PURE_REWRITE_RULE[base_const; SYM def_array.(i)] th0;;
+
+let nexp_lo_array = Array.init arith_base gen_nexp_lo and
+    nexp_lo1_array = Array.init arith_base gen_nexp_lo1;;
+
+let nexp_lo =
+  let rec lo_bound n tm =
+    let _ = assert (n >= 1) in
+      match tm with
+	| Comb (Const (name, _), n_tm) ->
+	    let i = index_of_name name in
+	      if n > 1 then
+		let lo_th = lo_bound (n - 1) n_tm in
+		let m_tm, k_tm = dest_nexp_term (lhand (concl lo_th)) in
+		let suc_k = nsuc k_tm in
+		let r_tm = rand (concl suc_k) in
+		let th0 = INST[n_tm, n_var_num; m_tm, m_var_num; 
+			       r_tm, r_var_num; k_tm, k_var_num] nexp_lo_array.(i) in
+		  MY_PROVE_HYP lo_th (MY_PROVE_HYP suc_k th0)
+	      else
+		INST[n_tm, n_var_num] nexp_lo1_array.(i)
+	| _ -> error "nexp_lo" [tm] [] 
+  in
+    fun p tm ->
+      let n = size_nat tm in
+	if n <= p then
+	  INST[tm, n_var_num] nexp_lo0'
+	else
+	  lo_bound (n - p) tm;;
+
+let nexp_lo_normal p tm =
+  let lo_th = nexp_lo p tm in
+    match (concl lo_th) with
+      | Comb (Comb (op_tm, ltm), rtm) ->
+	  let flag, n_th = nexp_normalize ltm in
+	    if flag then
+	      EQ_MP (AP_THM (AP_TERM op_tm n_th) rtm) lo_th
+	    else
+	      lo_th
+      | _ -> error "nexp_lo_normal" [tm] [];;
+
+
+(*************************)
+
+let nexp_hi0' = (th_num_rule o prove)
+  (`n <= nexp n 0`,
+   REWRITE_TAC[nexp_exp0; LE_REFL]);;
+
+let gen_nexp_hi =
+  let hi_thm = (DISCH `i < base_const <=> T` o th_rule o prove)
+    (`(i < base_const <=> T) /\ n < nexp m k /\ SUC k = r 
+	==> base_const * n + i < nexp m r`,
+     REPEAT STRIP_TAC THEN POP_ASSUM (fun th -> REWRITE_TAC[SYM th]) THEN
+       REWRITE_TAC[nexp_suc] THEN
+       MATCH_MP_TAC LTE_TRANS THEN EXISTS_TAC `base_const * SUC n` THEN
+       CONJ_TAC THENL [
+	 ASM_ARITH_TAC;
+	 ASM_REWRITE_TAC[LE_MULT_LCANCEL; LE_SUC_LT]
+       ]) in
+    fun i ->
+      let i_tm = mk_small_numeral i in
+      let lt_th = NUM_LT_CONV (mk_binary "<" (i_tm, rand (concl base_const))) in
+      let th0 = INST[i_tm, i_var_num] hi_thm in
+      let th1 = PURE_REWRITE_RULE[base_const; SYM def_array.(i)] th0 in
+	MP th1 lt_th;;
+
+let gen_nexp_hi1 = 
+  let hi_thm = (DISCH `i < base_const <=> T` o th_num_rule o prove)
+    (`(i < base_const <=> T) /\ SUC n = m 
+	==> base_const * n + i < nexp m 1`,
+     STRIP_TAC THEN REWRITE_TAC[ONE; nexp_suc; nexp_exp0] THEN
+       POP_ASSUM (fun th -> REWRITE_TAC[SYM th]) THEN ASM_ARITH_TAC) in
+    fun i ->
+      let i_tm = mk_small_numeral i in
+      let lt_th = NUM_LT_CONV (mk_binary "<" (i_tm, rand (concl base_const))) in
+      let th0 = INST[i_tm, i_var_num] hi_thm in
+      let th1 = PURE_REWRITE_RULE[base_const; SYM def_array.(i)] th0 in
+	MP th1 lt_th;;
+
+let nexp_hi_array = Array.init arith_base gen_nexp_hi and
+    nexp_hi1_array = Array.init arith_base gen_nexp_hi1;;
+
+(* Note: the number of digits in the result may be larger than p due to trailing zeros *)
+let nexp_hi =
+  let lt_imp_le = (th_rule o ARITH_RULE) `m < n ==> m <= n:num` in
+  let name0 = name_array.(0) in
+  let rec check_d0s n tm =
+    match tm with
+      | Comb (Const (name, _), rtm) when name = name0 ->
+	  if n > 1 then check_d0s (n - 1) rtm else true
+      | _ -> false
+  in
+  let rec hi_bound n tm =
+    let _ = assert (n >= 1) in
+      match tm with
+	| Comb (Const (name, _), n_tm) ->
+	    let i = index_of_name name in
+	      if n > 1 then
+		let hi_th = hi_bound (n - 1) n_tm in
+		let m_tm, k_tm = dest_nexp_term (rand (concl hi_th)) in
+		let suc_k = nsuc k_tm in
+		let r_tm = rand (concl suc_k) in
+		let th0 = INST[n_tm, n_var_num; m_tm, m_var_num; 
+			       r_tm, r_var_num; k_tm, k_var_num] nexp_hi_array.(i) in
+		  MY_PROVE_HYP hi_th (MY_PROVE_HYP suc_k th0)
+	      else
+		let suc_n = nsuc n_tm in
+		let m_tm = rand (concl suc_n) in
+		let th0 = INST[n_tm, n_var_num; m_tm, m_var_num] nexp_hi1_array.(i) in
+		  MY_PROVE_HYP suc_n th0
+	| _ -> error "nexp_hi (hi_bound)" [tm] [] 
+  in
+    fun p tm ->
+      let n = size_nat tm in
+      let k = n - p in
+	(* Emulation of || *)
+      let flag = if k <= 0 then true else check_d0s k tm in
+	if flag then
+	  INST[tm, n_var_num] nexp_hi0'
+	else
+	  let lt_th = hi_bound k tm in
+	    match (concl lt_th) with
+	      | Comb (Comb (_, ltm), rtm) ->
+		  let th0 = INST[ltm, m_var_num; rtm, n_var_num] lt_imp_le in
+		    MY_PROVE_HYP lt_th th0
+	      | _ -> error "nexp_hi" [tm] [];;
+
+let nexp_hi_normal p tm =
+  let hi_th = nexp_hi p tm in
+    match (concl hi_th) with
+      | Comb (ltm, rtm) ->
+	  let flag, n_th = nexp_normalize rtm in
+	    if flag then
+	      EQ_MP (AP_TERM ltm n_th) hi_th
+	    else
+	      hi_th
+      | _ -> error "nexp_hi_normal" [tm] [];;
+
+
+(*************************)
+
+let make_lo_bin_op op p tm1 tm2 =
+  let eq_th = op tm1 tm2 in
+  let lo_th = nexp_lo_normal p (rand (concl eq_th)) in
+  let ltm = rator (concl lo_th) in
+  let th0 = AP_TERM ltm eq_th in
+    EQ_MP (SYM th0) lo_th;;
+
+let make_hi_bin_op op p tm1 tm2 =
+  let eq_th = op tm1 tm2 in
+  let hi_th = nexp_hi_normal p (rand (concl eq_th)) in
+    match (concl hi_th) with
+      | Comb (Comb (op_tm, _), rtm) ->
+	  let th0 = AP_THM (AP_TERM op_tm eq_th) rtm in
+	    EQ_MP (SYM th0) hi_th
+      | _ -> error "make_hi_bin_op" [tm1; tm2] [hi_th];;
+
+let nmul_lo = make_lo_bin_op nmul and
+    nmul_hi = make_hi_bin_op nmul;;
+
+(***********************)
+
+
+let fp_mul_eq = prove
+  (`!s1 m1 e1 s2 m2 e2.
+     fp s1 m1 e1 * fp s2 m2 e2 = fp (if s1 then ~s2 else s2) (m1 * m2) (e1 + e2)`,
+   REPEAT GEN_TAC THEN REWRITE_TAC[fp] THEN
+     SIMP_TAC[IPOW_ADD; base_const_not_zero; GSYM REAL_OF_NUM_MUL] THEN
+     REAL_ARITH_TAC);;
+
+let fp_mul_same_eq = prove
+  (`!s m1 e1 m2 e2.
+     fp s m1 e1 * fp s m2 e2 = fp F (m1 * m2) (e1 + e2)`,
+   REPEAT GEN_TAC THEN REWRITE_TAC[fp_mul_eq] THEN
+     REPEAT (FIRST [AP_TERM_TAC; AP_THM_TAC]) THEN ARITH_TAC);;
+
+let fp_mul_opp_eq = prove
+  (`!s1 s2 m1 e1 m2 e2. 
+     ~(s1 = s2)
+     ==> fp s1 m1 e1 * fp s2 m2 e2 = fp T (m1 * m2) (e1 + e2)`,
+   REPEAT STRIP_TAC THEN REWRITE_TAC[fp_mul_eq] THEN
+     REPEAT (FIRST [AP_TERM_TAC; AP_THM_TAC]) THEN
+     ASM_ARITH_TAC);;
+
+let fp_mul_same_eq_alt = prove
+  (`!s. m1 * m2 = m /\ e1 + e2 = e 
+      ==> fp s m1 e1 * fp s m2 e2 = fp F m e`,
+   REPEAT STRIP_TAC THEN ASM_REWRITE_TAC[fp_mul_same_eq]);;
+
+let fp_mul_opp_eq_alt = prove
+  (`!s1 s2. ~(s1 = s2) /\ m1 * m2 = m /\ e1 + e2 = e
+      ==> fp s1 m1 e1 * fp s2 m2 e2 = fp T m e`,
+   REPEAT STRIP_TAC THEN ASM_SIMP_TAC[fp_mul_opp_eq]);;
+
+let fp_mul_same_hi, 
+    fp_mul_same_lo = 
+  let same_hi = 
+    `!s. m1 * m2 <= nexp m k /\ e1 + e2 = r /\ pos_int k + r = e 
+	==> fp s m1 e1 * fp s m2 e2 <= fp F m e` in
+  let same_lo = 
+    `!s. nexp m k <= m1 * m2 /\ e1 + e2 = r /\ pos_int k + r = e
+	==> fp F m e <= fp s m1 e1 * fp s m2 e2` in
+  let proof = 
+    REPEAT STRIP_TAC THEN ASM_REWRITE_TAC[fp_mul_same_eq; fp; REAL_MUL_LID] THEN
+      POP_ASSUM (fun th -> REWRITE_TAC[SYM th]) THEN
+      SIMP_TAC[base_const_not_zero; IPOW_ADD; pos_int] THEN
+      REWRITE_TAC[REAL_MUL_ASSOC; IPOW_NUM; REAL_OF_NUM_POW; REAL_OF_NUM_MUL; GSYM nexp] THEN
+      MATCH_MP_TAC REAL_LE_RMUL THEN
+      ASM_REWRITE_TAC[ipow_base_const_le; REAL_OF_NUM_LE] in
+    prove(same_hi, proof),
+    prove(same_lo, proof);;
+
+let fp_mul_opp_hi, 
+    fp_mul_opp_lo = 
+  let opp_hi = 
+    `!s1 s2. ~(s1 = s2) /\ nexp m k <= m1 * m2 /\ e1 + e2 = r /\ pos_int k + r = e
+	==> fp s1 m1 e1 * fp s2 m2 e2 <= fp T m e` in
+  let opp_lo = 
+    `!s1 s2. ~(s1 = s2) /\ m1 * m2 <= nexp m k /\ e1 + e2 = r /\ pos_int k + r = e
+	==> fp T m e <= fp s1 m1 e1 * fp s2 m2 e2` in
+  let proof = 
+    REPEAT STRIP_TAC THEN ASM_SIMP_TAC[fp_mul_opp_eq; fp; GSYM REAL_NEG_MINUS1] THEN
+      POP_ASSUM (fun th -> REWRITE_TAC[SYM th; REAL_LE_NEG]) THEN
+      SIMP_TAC[base_const_not_zero; IPOW_ADD; pos_int] THEN
+      REWRITE_TAC[REAL_MUL_ASSOC; IPOW_NUM; REAL_OF_NUM_POW; REAL_OF_NUM_MUL; GSYM nexp] THEN
+      MATCH_MP_TAC REAL_LE_RMUL THEN
+      ASM_REWRITE_TAC[ipow_base_const_le; REAL_OF_NUM_LE] in
+    prove(opp_hi, proof),
+    prove(opp_lo, proof);;
+
+let fp_mul_ff_eq' = th_rule (SPEC `F` fp_mul_same_eq_alt) and
+    fp_mul_tt_eq' = th_rule (SPEC `T` fp_mul_same_eq_alt) and
+    fp_mul_ft_eq' = th_rule (REWRITE_RULE[] (SPECL [`F`; `T`] fp_mul_opp_eq_alt)) and
+    fp_mul_tf_eq' = th_rule (REWRITE_RULE[] (SPECL [`T`; `F`] fp_mul_opp_eq_alt)) and
+    fp_mul_ff_hi' = th_rule (SPEC `F` fp_mul_same_hi) and
+    fp_mul_ff_lo' = th_rule (SPEC `F` fp_mul_same_lo) and
+    fp_mul_tt_hi' = th_rule (SPEC `T` fp_mul_same_hi) and
+    fp_mul_tt_lo' = th_rule (SPEC `T` fp_mul_same_lo) and
+    fp_mul_ft_hi' = th_rule (REWRITE_RULE[] (SPECL [`F`; `T`] fp_mul_opp_hi)) and
+    fp_mul_ft_lo' = th_rule (REWRITE_RULE[] (SPECL [`F`; `T`] fp_mul_opp_lo)) and
+    fp_mul_tf_hi' = th_rule (REWRITE_RULE[] (SPECL [`T`; `F`] fp_mul_opp_hi)) and
+    fp_mul_tf_lo' = th_rule (REWRITE_RULE[] (SPECL [`T`; `F`] fp_mul_opp_lo));;
+
+let fp_mul_x0_eq = prove
+  (`(m2 = zero_num <=> T) ==> fp s1 m1 e1 * fp s2 m2 e2 = fp F 0 (pos_int 0)`,
+   REWRITE_TAC[zero_num] THEN REPEAT STRIP_TAC THEN
+     ASM_REWRITE_TAC[fp_mul_eq; MULT_0; fp] THEN REAL_ARITH_TAC);;
+
+let fp_mul_0x_eq = prove
+  (`(m1 = zero_num <=> T) ==> fp s1 m1 e1 * fp s2 m2 e2 = fp F 0 (pos_int 0)`,
+   REWRITE_TAC[zero_num] THEN REPEAT STRIP_TAC THEN
+     ASM_REWRITE_TAC[fp_mul_eq; MULT; fp] THEN REAL_ARITH_TAC);;
+
+let fp_mul_x0_eq' = th_num_rule fp_mul_x0_eq and
+    fp_mul_0x_eq' = th_num_rule fp_mul_0x_eq;;
+
+let fp_mul_x0_hi',
+    fp_mul_x0_lo',
+    fp_mul_0x_hi',
+    fp_mul_0x_lo' =
+  let proof = SIMP_TAC[fp_mul_x0_eq; fp_mul_0x_eq; REAL_LE_REFL] in
+  let r tm = th_num_rule (prove (tm, proof)) in
+    r `(m2 = zero_num <=> T) ==> fp s1 m1 e1 * fp s2 m2 e2 <= fp F 0 (pos_int 0)`,
+    r `(m2 = zero_num <=> T) ==> fp F 0 (pos_int 0) <= fp s1 m1 e1 * fp s2 m2 e2`,
+    r `(m1 = zero_num <=> T) ==> fp s1 m1 e1 * fp s2 m2 e2 <= fp F 0 (pos_int 0)`,
+    r `(m1 = zero_num <=> T) ==> fp F 0 (pos_int 0) <= fp s1 m1 e1 * fp s2 m2 e2`;;
+
+(* TODO: normalization *)
+let fmul_eq f1 f2 =
+  let s1, m1, e1 = dest_fp_term f1 and
+      s2, m2, e2 = dest_fp_term f2 in
+  let insts = [m1, m1_var_num; e1, e1_var_int;
+	       m2, m2_var_num; e2, e2_var_int] in
+    (* Multiplication by 0 *)
+  let m1_eq0, flag = neq0 m1 in
+    if flag then
+      let th1 = INST ((mk_bool_term s1, s1_var_bool) ::
+			(mk_bool_term s2, s2_var_bool) :: insts) fp_mul_0x_eq' in
+	MY_PROVE_HYP m1_eq0 th1
+    else
+      let m2_eq0, flag = neq0 m2 in
+	if flag then
+	  let th1 = INST ((mk_bool_term s1, s1_var_bool) ::
+			    (mk_bool_term s2, s2_var_bool) :: insts) fp_mul_x0_eq' in
+	    MY_PROVE_HYP m2_eq0 th1
+	else
+	  (* Regular multiplication *)
+	  let m_th = nmul m1 m2 in
+	  let e_th = iadd e1 e2 in
+	  let m_tm = rand (concl m_th) in
+	  let e_tm = rand (concl e_th) in
+	  let th0 =
+	    match (s1, s2) with
+	      | (false, false) -> fp_mul_ff_eq'
+	      | (true, true) -> fp_mul_tt_eq'
+	      | (false, true) -> fp_mul_ft_eq'
+	      | (true, false) -> fp_mul_tf_eq' in
+	  let th1 = INST ((m_tm, m_var_num) :: (e_tm, e_var_int) :: insts) th0 in
+	    MY_PROVE_HYP m_th (MY_PROVE_HYP e_th th1);;
+
+let fmul_hi p f1 f2 =
+  let s1, m1, e1 = dest_fp_term f1 and
+      s2, m2, e2 = dest_fp_term f2 in
+  let insts = [m1, m1_var_num; e1, e1_var_int;
+	       m2, m2_var_num; e2, e2_var_int] in
+    (* Multiplication by 0 *)
+  let m1_eq0, flag = neq0 m1 in
+    if flag then
+      let th1 = INST ((mk_bool_term s1, s1_var_bool) ::
+			(mk_bool_term s2, s2_var_bool) :: insts) fp_mul_0x_hi' in
+	MY_PROVE_HYP m1_eq0 th1
+    else
+      let m2_eq0, flag = neq0 m2 in
+	if flag then
+	  let th1 = INST ((mk_bool_term s1, s1_var_bool) ::
+			    (mk_bool_term s2, s2_var_bool) :: insts) fp_mul_x0_hi' in
+	    MY_PROVE_HYP m2_eq0 th1
+	else
+	  (* Regular multiplication *)
+	  let th0, flag =
+	    match (s1, s2) with
+	      | (false, false) -> fp_mul_ff_hi', true
+	      | (true, true) -> fp_mul_tt_hi', true
+	      | (false, true) -> fp_mul_ft_hi', false
+	      | (true, false) -> fp_mul_tf_hi', false in
+	  let mul_th, nexp_tm = 
+	    if flag then
+	      let th = nmul_hi p m1 m2 in
+		th, rand (concl th)
+	    else
+	      let th = nmul_lo p m1 m2 in
+		th, lhand (concl th) in
+	  let m_tm, k_tm = dest_nexp_term nexp_tm in
+	  let r_th = iadd e1 e2 in
+	  let r_tm = rand (concl r_th) in
+	  let e_th = iadd (mk_comb (pos_int_const, k_tm)) r_tm in
+	  let e_tm = rand (concl e_th) in
+	  let th1 = INST ((m_tm, m_var_num) :: (k_tm, k_var_num) ::
+			  (r_tm, r_var_int) :: (e_tm, e_var_int) :: insts) th0 in
+	    MY_PROVE_HYP mul_th (MY_PROVE_HYP e_th (MY_PROVE_HYP r_th th1));;
+
+let fmul_lo p f1 f2 =
+  let s1, m1, e1 = dest_fp_term f1 and
+      s2, m2, e2 = dest_fp_term f2 in
+  let insts = [m1, m1_var_num; e1, e1_var_int;
+	       m2, m2_var_num; e2, e2_var_int] in
+    (* Multiplication by 0 *)
+  let m1_eq0, flag = neq0 m1 in
+    if flag then
+      let th1 = INST ((mk_bool_term s1, s1_var_bool) ::
+			(mk_bool_term s2, s2_var_bool) :: insts) fp_mul_0x_lo' in
+	MY_PROVE_HYP m1_eq0 th1
+    else
+      let m2_eq0, flag = neq0 m2 in
+	if flag then
+	  let th1 = INST ((mk_bool_term s1, s1_var_bool) ::
+			    (mk_bool_term s2, s2_var_bool) :: insts) fp_mul_x0_lo' in
+	    MY_PROVE_HYP m2_eq0 th1
+	else
+	  (* Regular multiplication *)
+	  let th0, flag =
+	    match (s1, s2) with
+	      | (false, false) -> fp_mul_ff_lo', false
+	      | (true, true) -> fp_mul_tt_lo', false
+	      | (false, true) -> fp_mul_ft_lo', true
+	      | (true, false) -> fp_mul_tf_lo', true in
+	  let mul_th, nexp_tm = 
+	    if flag then
+	      let th = nmul_hi p m1 m2 in
+		th, rand (concl th)
+	    else
+	      let th = nmul_lo p m1 m2 in
+		th, lhand (concl th) in
+	  let m_tm, k_tm = dest_nexp_term nexp_tm in
+	  let r_th = iadd e1 e2 in
+	  let r_tm = rand (concl r_th) in
+	  let e_th = iadd (mk_comb (pos_int_const, k_tm)) r_tm in
+	  let e_tm = rand (concl e_th) in
+	  let th1 = INST ((m_tm, m_var_num) :: (k_tm, k_var_num) ::
+			  (r_tm, r_var_int) :: (e_tm, e_var_int) :: insts) th0 in
+	    MY_PROVE_HYP mul_th (MY_PROVE_HYP e_th (MY_PROVE_HYP r_th th1));;
+
+
+fmul_hi 2 (mk_small_fp (240024, 16))
+          (mk_small_fp (3353, -17));;
+
+
+(***********************************)
+
+let decode_fp str =
+  let m_str, e_str = split_at str ',' in
+    mk_fp (Num.num_of_string m_str, Num.num_of_string e_str);;
+
+let convert_fp_binop_data str =
+  try
+    let p_str, str = split_at str ':' in
+    let f1_str, f2_str = split_at str ';' in
+      int_of_string p_str, decode_fp f1_str, decode_fp f2_str
+  with Failure msg ->
+    failwith str;;
+
+let fp_test rep data f =
+  run_tests rep data I convert_fp_binop_data I
+    ~result:!show_result (uncurry3 f);;
+
+show_result := true;;
+show_result := false;;
+
+
+ftest2 10 "../tests/log_sin_cos/mul_lo.log" Arith_float.float_mul_lo;;
+fp_test 10 "../tests/log_sin_cos/mul_lo.log" fmul_lo;;
+
+ftest2 10 "../tests/log_poly/mul_lo.log" Arith_float.float_mul_lo;;
+fp_test 10 "../tests/log_poly/mul_lo.log" fmul_lo;;
+
+ftest2 1 "../tests/log_big/mul_lo.log" Arith_float.float_mul_lo;;
+fp_test 1 "../tests/log_big/mul_lo.log" fmul_lo;;
+
+
+ftest2 10 "../tests/log_sin_cos/mul_hi.log" Arith_float.float_mul_hi;;
+fp_test 10 "../tests/log_sin_cos/mul_hi.log" fmul_hi;;
+
+ftest2 10 "../tests/log_poly/mul_hi.log" Arith_float.float_mul_hi;;
+fp_test 10 "../tests/log_poly/mul_hi.log" fmul_hi;;
+
+ftest2 1 "../tests/log_big/mul_hi.log" Arith_float.float_mul_hi;;
+fp_test 1 "../tests/log_big/mul_hi.log" fmul_hi;;
+
+
+
+
+
+let num_exp_test rep data f =
+  run_tests rep data mk_nums (rand o Arith_nat.mk_numeral_array) I
+    ~result:!show_result f;;
+
+let nexp_test rep data f =
+  run_tests rep data mk_nums mk_nat I
+    ~result:!show_result f;;
+
+
+let tm = rand (Arith_nat.mk_small_numeral_array 2142);;
+
+Arith_float.lo_num_conv 2 tm;;
+nexp_lo 2 (mk_small_nat 2142);;
+
+nexp_lo_array.(3);;
+
+let num_exp_lo p tm =
+  let lo_th = Arith_float.lo_num_conv p tm in
+  let ltm, rtm = dest_comb (concl lo_th) in
+  let op_tm, m_tm = dest_comb ltm in
+  let eq_th, _ = Arith_float.normalize m_tm in
+    EQ_MP (AP_THM (AP_TERM op_tm eq_th) rtm) lo_th;;
+
+show_result := false;;
+show_result := true;;
+
+let pp = 4;;
+
+num_exp_test 10 "../tests/data/nat10_small.txt" (num_exp_lo pp);;
+nexp_test 10 "../tests/data/nat10_small.txt" (nexp_lo pp);;
+nexp_test 10 "../tests/data/nat10_small.txt" (nexp_lo_normal pp);;
+
+num_exp_test 10 "../tests/data/nat10_small.txt" (Arith_float.lo_num_conv pp);;

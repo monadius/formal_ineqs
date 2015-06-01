@@ -152,7 +152,6 @@ let convert_float_binop_data str =
   let f1_str, f2_str = split_at str ';' in
     int_of_string p_str, decode_float f1_str, decode_float f2_str;;
 
-
 (*********************************************************)
 (* Test operations                                       *)
 (*********************************************************)

@@ -52,17 +52,17 @@ let assert_msg (cond, msg) =
   if cond then () else failwith msg;;
 
 (* Generates a power function for the given binary operation *)
-let gen_pow op id n x =
+let gen_pow op id =
   let ( * ) = op in
-  let rec pow n =
+  let rec pow n x =
     if n <= 0 then id
     else if n = 1 then x
     else if n land 1 = 1 then
-      x * pow (n - 1)
+      x * pow (n - 1) x
     else
-      let t = pow (n lsr 1) in
+      let t = pow (n lsr 1) x in
 	t * t in
-    pow n;;
+    pow;;
 
 let rec shape_list n list =
   if length list <= n then [list]

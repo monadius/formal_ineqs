@@ -30,6 +30,11 @@ module type Arith_float_sig =
     val normalize : term -> thm * bool
     val denormalize : term -> thm
 
+    val lo_num_conv : int -> term -> thm
+    val hi_num_conv : int -> term -> thm
+    val num_exp_lo : int -> term -> thm
+    val num_exp_hi : int -> term -> thm
+
     val float_lt0 : term -> thm
     val float_gt0 : term -> thm
     val float_lt : term -> term -> thm

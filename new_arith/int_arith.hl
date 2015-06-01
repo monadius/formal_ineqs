@@ -11,9 +11,9 @@ module type Int_arith_sig =
     val pos_int_const : term
     val neg_int_const : term
 
-    val mk_int : Num.num -> term
+    val mk_int : num -> term
     val mk_small_int : int -> term
-    val dest_int : term -> Num.num
+    val dest_int : term -> num
 
     val ineg : term -> thm
 
@@ -584,7 +584,6 @@ test 100000 (iadd itm1) tm2;;
 
 (*
 
-*********************)
 open Misc_functions;;
 open Nat_arith;;
 

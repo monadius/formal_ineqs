@@ -7,15 +7,22 @@
 module type Nat_arith_sig =
   sig
     val arith_base : int
+    val base_const : thm
+    val name_array : string array
     val const_array : term array
       (* |- D_i(n) = base * n + i *)
-    val def_array: thm array
+    val def_array : thm array
       (* |- D_i(n) = D_i(_0) + D0(n) *)
-    val def_thm_array: thm array
+    val def_thm_array : thm array
+      (* D6 -> 6, D30 -> 30 *)
+    val index_of_name : string -> int
+    val index_of_name2 : string -> string -> int
 
     val mk_nat : num -> term
     val mk_small_nat : int -> term
     val dest_nat : term -> num
+      (* Returns the number of digits in a numeral (including all zero digits) *)
+    val size_nat : term -> int
 
     val TO_NAT_CONV : term -> thm
     val replace_numerals : term -> term
@@ -68,12 +75,17 @@ let fnum_type = `:num->num` and
     bit1_const = `BIT1` and
     max_const = mk_small_numeral maximum;;
 
+(* |- base_const = {arith_base} *)
+let base_const = 
+  let eq = mk_eq(`base_const : num`, mk_small_numeral arith_base) in
+    new_basic_definition eq;;
+
 (* Names of constants which define "digits" *)
-let names_array = Array.init maximum (fun i -> "N"^(string_of_int i));;
+let name_array = Array.init maximum (fun i -> "N"^(string_of_int i));;
 
 (* |- D_i(n) = i + D_0(n) *)
 let mk_bit_definition i =
-  let lhs = mk_var (names_array.(i), fnum_type) in
+  let lhs = mk_var (name_array.(i), fnum_type) in
   let tm1 = mk_binop mul_op_num (mk_small_numeral arith_base) n_var_num in
   let tm2 = mk_binop add_op_num tm1 (mk_small_numeral i) in
   let rhs = mk_abs (n_var_num, tm2) in
@@ -87,10 +99,10 @@ let def_array =
   Array.init maximum def;;
 
 let const_array = 
-  Array.init maximum (fun i -> mk_const (names_array.(i),[]));;
+  Array.init maximum (fun i -> mk_const (name_array.(i),[]));;
 
 let d0_const = const_array.(0) and
-    d0_name = names_array.(0);;
+    d0_name = name_array.(0);;
 
 (* Alternative definition of D_i *)
 let zero_const_eq_zero = prove
@@ -192,6 +204,13 @@ let dest_nat =
 	    n +/ Int (index_of_name name)
       | _ -> error "dest_nat" [tm] [] in
     dest;;
+
+let rec size_nat tm =
+  match tm with
+    | Const ("_0", _) -> 0
+    | Comb (Const (name, _), rtm) ->
+	size_nat rtm + 1
+    | _ -> error "size_nat" [tm] [];;
 
 (* ------------------------------------------------------------------------- *)
 (* TO_NAT_CONV: converts HOL numerals to our numerals                        *)
@@ -592,8 +611,8 @@ let eq_array =
     for i = 0 to maximum - 1 do
       let sym = INST[n_var_num, m_var_num; m_var_num, n_var_num] o CONV_RULE (LAND_CONV SYM_CONV) in
       let th = ref (gen_di_eq_dj 0 i) in
-      let name_left = names_array.(0) and
-	  name_right = names_array.(i) in
+      let name_left = name_array.(0) and
+	  name_right = name_array.(i) in
       let _ = eqs.(index_of_name2 name_left name_right) <- !th in
       let _ = 
 	if i > 0 then
@@ -602,8 +621,8 @@ let eq_array =
 	  () in
 	for k = 1 to maximum - i - 1 do
 	  let x = k and y = i + k in
-	  let name_left = names_array.(x) and
-	      name_right = names_array.(y) in
+	  let name_left = name_array.(x) and
+	      name_right = name_array.(y) in
 	  let _ = th := gen_next_eq_thm !th in
 	  let _ = eqs.(index_of_name2 name_left name_right) <- !th in
 	    if y > x then

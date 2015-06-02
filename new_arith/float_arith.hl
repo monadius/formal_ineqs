@@ -63,6 +63,17 @@ let dest_fp tm =
   let e = dest_int e_tm in
     (if s then minus_num m else m), e;;
 
+let print_float fmt tm =
+  try
+    let m, e = dest_fp tm in
+    let e_str = string_of_int arith_base ^ "^" ^ Num.string_of_num e in
+    let str = "###" ^ Num.string_of_num m ^ "*" ^ e_str in
+      Format.pp_print_string fmt str
+  with _ -> failwith "print_float";;
+
+(* install_user_printer ("float", print_float);; *)
+
+
 (*****************)
 
 let th_rule = UNDISCH_ALL o PURE_REWRITE_RULE[GSYM IMP_IMP] o SPEC_ALL;;
@@ -324,6 +335,106 @@ let make_hi_bin_op op p tm1 tm2 =
 
 let nmul_lo = make_lo_bin_op nmul and
     nmul_hi = make_hi_bin_op nmul;;
+
+(***********************)
+
+let k_split = new_definition
+  `!k n n1 n2. k_split k n n1 n2 <=> n = nexp n1 k + n2 /\ n2 < nexp 1 k`;;
+
+let dest_k_split tm =
+  match tm with
+    | Comb (Comb (Comb (Comb (Const ("k_split", _), k_tm), n_tm), n1_tm), n2_tm) ->
+	k_tm, n_tm, n1_tm, n2_tm
+    | _ -> error "dest_k_split" [tm] [];;
+
+let k_split0 = prove
+  (`!n. k_split 0 n n 0`,
+   REWRITE_TAC[k_split; nexp_exp0; ADD_0; ARITH]);;
+
+let k_split_mul = prove
+  (`k_split k1 m m1 m2 /\ k_split k2 n n1 n2
+     ==> m * n = nexp (m1 * n1) (k1 + k2) + nexp (m1 * n2) k1 + nexp (m2 * n1) k2 + m2 * n2`,
+   REWRITE_TAC[k_split; nexp] THEN STRIP_TAC THEN
+     ASM_REWRITE_TAC[EXP_ADD] THEN ARITH_TAC);;
+
+let k_split_mul_hi = prove
+  (`k_split k m m1 m2 /\ k_split k n n1 n2
+     ==> m * n <= nexp (SUC (m1 * n1)) (2 * k) + nexp (m1 * n2 + m2 * n1) k`,
+   REWRITE_TAC[k_split; nexp; MULT_CLAUSES] THEN STRIP_TAC THEN ASM_REWRITE_TAC[] THEN
+     REWRITE_TAC[ARITH_RULE `(a * t + b) * (c * t + d) <= (e * f + f) + g * t 
+		 <=> a * c * t EXP 2 + (a * d + b * c) * t + b * d <= e * f + g * t + f`] THEN
+     REWRITE_TAC[GSYM EXP_MULT; MULT_AC; LE_ADD_LCANCEL] THEN
+     REWRITE_TAC[EXP_MULT; EXP_2] THEN
+     ASM_SIMP_TAC[LE_MULT2; LT_IMP_LE]);;
+
+
+let gen_k_split =
+  let k_split_th = (DISCH `i < base_const <=> T` o th_rule o prove)
+    (`(i < base_const <=> T) /\ k_split k n n1 n2 /\ SUC k = r
+	==> k_split r (base_const * n + i) n1 (base_const * n2 + i)`,
+     REWRITE_TAC[k_split] THEN STRIP_TAC THEN POP_ASSUM (fun th -> REWRITE_TAC[SYM th]) THEN
+       ASM_REWRITE_TAC[nexp_suc] THEN CONJ_TAC THENL [ARITH_TAC; ALL_TAC] THEN
+       MATCH_MP_TAC LTE_TRANS THEN EXISTS_TAC `base_const * n2 + base_const` THEN
+       ASM_REWRITE_TAC[LT_ADD_LCANCEL; ARITH_RULE `a * b + a = a * SUC b`] THEN
+       ASM_REWRITE_TAC[LE_MULT_LCANCEL; LE_SUC_LT]) in
+    fun i ->
+      let i_tm = mk_small_numeral i in
+      let lt_th = NUM_LT_CONV (mk_binary "<" (i_tm, rand (concl base_const))) in
+      let th0 = INST[i_tm, i_var_num] k_split_th in
+      let th1 = PURE_REWRITE_RULE[base_const; SYM def_array.(i)] th0 in
+	MP th1 lt_th;;
+
+let gen_k_split1 =
+  let k_split1_th = (DISCH `i < base_const <=> T` o th_num_rule o prove)
+    (`(i < base_const <=> T)
+	==> k_split 1 (base_const * n + i) n i`,
+     REWRITE_TAC[k_split; nexp; EXP_1; MULT_CLAUSES; MULT_AC]) in
+    fun i ->
+      let i_tm = mk_small_numeral i in
+      let lt_th = NUM_LT_CONV (mk_binary "<" (i_tm, rand (concl base_const))) in
+      let th0 = INST[i_tm, i_var_num] k_split1_th in
+      let th1 = PURE_REWRITE_RULE[base_const; SYM def_array.(i)] th0 in
+	REPLACE_NUMERALS (MP th1 lt_th);;
+
+let k_split_array = Array.init arith_base gen_k_split and
+    k_split1_array = Array.init arith_base gen_k_split1;;
+
+let split_nat =
+  let split0' = th_num_rule k_split0 in
+  let rec split k tm =
+    match tm with
+      | Comb (Const (name, _), n_tm) ->
+	  let i = index_of_name name in
+	    if k > 1 then
+	      let split_th = split (k - 1) n_tm in
+	      let k_tm, _, n1_tm, n2_tm = dest_k_split (concl split_th) in
+	      let suc_k = nsuc k_tm in
+	      let r_tm = rand (concl suc_k) in
+	      let th0 = INST[k_tm, k_var_num; r_tm, r_var_num;
+			     n_tm, n_var_num; n1_tm, n1_var_num;
+			     n2_tm, n2_var_num] k_split_array.(i) in
+		MY_PROVE_HYP suc_k (MY_PROVE_HYP split_th th0)
+	    else
+	      INST[n_tm, n_var_num] k_split1_array.(i)
+      | _ -> error "split_nat (split)" [tm] []
+  in
+    fun k tm ->
+      if k <= 0 then
+	INST[tm, n_var_num] split0'
+      else
+	split k tm;;
+
+split_nat 2 (mk_small_nat 335235);;
+
+show_result := false;;
+(* 100: 0.430 *)
+ntest1_new 10 "../tests/data/nat10_small.txt" (split_nat 3);;
+
+
+install_user_printer;;
+
+let x = 2;;
+
 
 (***********************)
 

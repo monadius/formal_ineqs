@@ -14,6 +14,7 @@ module type Int_arith_sig =
     val mk_int : num -> term
     val mk_small_int : int -> term
     val dest_int : term -> num
+    val print_int : formatter -> term -> unit
 
     val ineg : term -> thm
 
@@ -55,7 +56,7 @@ let INT_TAC =
     INT_ARITH_TAC;;
 
 (* ------------------------------------------------------------------------- *)
-(* mk_int, dest_int                                                          *)
+(* mk_int, dest_int, print_int                                               *)
 (* ------------------------------------------------------------------------- *)
 
 let mk_int n =
@@ -77,6 +78,13 @@ let dest_int tm =
     | Comb (Const ("neg_int", _), n_tm) ->
 	minus_num (dest_nat n_tm)
     | _ -> error "dest_int" [tm] [];;
+
+let print_int fmt tm =
+  try
+    let n = dest_int tm in
+    let str = "''" ^ Num.string_of_num n in
+      Format.pp_print_string fmt str
+  with _ -> failwith "print_int";;
 
 (* ------------------------------------------------------------------------- *)
 (* -a: ineg                                                                  *)

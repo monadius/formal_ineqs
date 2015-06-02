@@ -23,6 +23,7 @@ module type Nat_arith_sig =
     val dest_nat : term -> num
       (* Returns the number of digits in a numeral (including all zero digits) *)
     val size_nat : term -> int
+    val print_nat : formatter -> term -> unit
 
     val TO_NAT_CONV : term -> thm
     val replace_numerals : term -> term
@@ -211,6 +212,13 @@ let rec size_nat tm =
     | Comb (Const (name, _), rtm) ->
 	size_nat rtm + 1
     | _ -> error "size_nat" [tm] [];;
+
+let print_nat fmt tm =
+  try
+    let n = dest_nat tm in
+    let str = "'" ^ Num.string_of_num n in
+      Format.pp_print_string fmt str
+  with _ -> failwith "print_nat";;
 
 (* ------------------------------------------------------------------------- *)
 (* TO_NAT_CONV: converts HOL numerals to our numerals                        *)

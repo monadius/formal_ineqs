@@ -1,0 +1,121 @@
+needs "new_arith/float_arith.hl";;
+needs "tests/test_utils.hl";;
+
+(***********************************)
+
+let decode_fp str =
+  let m_str, e_str = split_at str ',' in
+    mk_fp (Num.num_of_string m_str, Num.num_of_string e_str);;
+
+let convert_fp_binop_data str =
+  try
+    let p_str, str = split_at str ':' in
+    let f1_str, f2_str = split_at str ';' in
+      int_of_string p_str, decode_fp f1_str, decode_fp f2_str
+  with Failure msg ->
+    failwith str;;
+
+let fp_test rep data f =
+  run_tests rep data I convert_fp_binop_data I
+    ~result:!show_result (uncurry3 f);;
+
+let add_result, get_result, print_results, clear_results =
+  let results = ref [] in
+  let clear = results := [] in
+  let add name ((time, _, _), _) = 
+    let _ = results := !results @ [name, time] in 
+      name, time in
+  let get name = assoc name !results in
+  let print1 (name, time) =
+    report (sprintf "%s:\ttime = %f" name time) in
+  let print () =
+    let _ = map print1 !results in () in
+    add, get, print, clear;;
+
+
+show_result := true;;
+show_result := false;;
+
+(* lo; sin_cos *)
+
+(* 0.764 *)
+add_result "lo; sin_cos (old)" 
+  (ftest2 10 "../tests/log_sin_cos/mul_lo.log" Arith_float.float_mul_lo);;
+
+(* 0.600 *)
+add_result "lo; sin_cos (1)"
+  (fp_test 10 "../tests/log_sin_cos/mul_lo.log" fmul_lo1);;
+
+(* 0.614 *)
+add_result "lo; sin_cos (2)"
+  (fp_test 10 "../tests/log_sin_cos/mul_lo.log" fmul_lo2);;
+
+(* lo; poly *)
+
+(* 1.127 *)
+add_result "lo; poly (old)"
+  (ftest2 10 "../tests/log_poly/mul_lo.log" Arith_float.float_mul_lo);;
+
+(* 0.764 *)
+add_result "lo; poly (1)"
+  (fp_test 10 "../tests/log_poly/mul_lo.log" fmul_lo1);;
+
+(* 0.829 *)
+add_result "lo; poly (2)"
+  (fp_test 10 "../tests/log_poly/mul_lo.log" fmul_lo2);;
+
+(* lo; big *)
+
+(* 169.165 *)
+add_result "lo; big (old)"
+  (ftest2 5 "../tests/log_big/mul_lo.log" Arith_float.float_mul_lo);;
+
+(* 109.790 *)
+add_result "lo; big (1)"
+  (fp_test 5 "../tests/log_big/mul_lo.log" fmul_lo1);;
+
+(* 110.710 *)
+add_result "lo; big (2)"
+  (fp_test 5 "../tests/log_big/mul_lo.log" fmul_lo2);;
+
+(* hi; sin_cos *)
+
+(* 0.919 *)
+add_result "hi; sin_cos (old)"
+  (ftest2 10 "../tests/log_sin_cos/mul_hi.log" Arith_float.float_mul_hi);;
+
+(* 0.722 *)
+add_result "hi; sin_cos (1)"
+  (fp_test 10 "../tests/log_sin_cos/mul_hi.log" fmul_hi1);;
+
+(* 0.747 *)
+add_result "hi; sin_cos (2)"
+  (fp_test 10 "../tests/log_sin_cos/mul_hi.log" fmul_hi2);;
+
+(* hi; poly *)
+
+(* 1.697 *)
+add_result "hi; poly (old)"
+  (ftest2 10 "../tests/log_poly/mul_hi.log" Arith_float.float_mul_hi);;
+
+(* 1.174 *)
+add_result "hi; poly (1)"
+  (fp_test 10 "../tests/log_poly/mul_hi.log" fmul_hi1);;
+
+(* 1.276 *)
+add_result "hi; poly (2)"
+  (fp_test 10 "../tests/log_poly/mul_hi.log" fmul_hi2);;
+
+(* hi; big *)
+
+(* 365.213 *)
+add_result "hi; big (old)"
+  (ftest2 5 "../tests/log_big/mul_hi.log" Arith_float.float_mul_hi);;
+
+(* 238.451 *)
+add_result "hi; big (1)"
+  (fp_test 5 "../tests/log_big/mul_hi.log" fmul_hi1);;
+
+(* 239.664 *)
+add_result "hi; big (2)"
+  (fp_test 5 "../tests/log_big/mul_hi.log" fmul_hi2);;

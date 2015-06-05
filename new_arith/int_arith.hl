@@ -14,6 +14,8 @@ module type Int_arith_sig =
     val mk_int : num -> term
     val mk_small_int : int -> term
     val dest_int : term -> num
+    val mk_int_term : bool * term -> term
+    val dest_int_term : term -> bool * term
     val print_int : formatter -> term -> unit
 
     val ineg : term -> thm
@@ -78,6 +80,20 @@ let dest_int tm =
     | Comb (Const ("neg_int", _), n_tm) ->
 	minus_num (dest_nat n_tm)
     | _ -> error "dest_int" [tm] [];;
+
+let mk_int_term (s, n_tm) =
+  if s then
+    mk_comb (neg_int_const, n_tm)
+  else
+    mk_comb (pos_int_const, n_tm);;
+
+let dest_int_term tm =
+  match tm with
+    | Comb (Const ("pos_int", _), n_tm) ->
+	false, n_tm
+    | Comb (Const ("neg_int", _), n_tm) ->
+	true, n_tm
+    | _ -> error "dest_int_term" [tm] [];;
 
 let print_int fmt tm =
   try

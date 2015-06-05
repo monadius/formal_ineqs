@@ -13,7 +13,10 @@ prioritize_real();;
 let r_var_int = `r : int` and
     e_var_int = `e : int` and
     e1_var_int = `e1 : int` and
-    e2_var_int = `e2 : int`;;
+    e2_var_int = `e2 : int` and
+    r3_var_num = `r3 : num` and
+    r4_var_num = `r4 : num` and
+    r5_var_num = `r5 : num`;;
 
 let nexp = new_definition
   `!n e. nexp n e = n * (base_const EXP e)`;;
@@ -21,13 +24,17 @@ let nexp = new_definition
 let fp = new_definition
   `!s m e. fp s m e = (if s then (-- &1) else &1) * &m * (&base_const ipow e)`;;
 
-let fp_const = `fp`;;
+let fp_const = `fp` and
+    nexp_const = `nexp`;;
 
 let zero_num = new_definition `zero_num = 0`;;
 
 let mk_bool_term b =
   if b then t_const else f_const;;
 
+let mk_nexp_term n_tm k_tm =
+  mk_comb (mk_comb (nexp_const, n_tm), k_tm);;
+  
 let dest_nexp_term tm =
   match tm with
     | Comb (Comb (Const ("nexp", _), n_tm), e_tm) -> n_tm, e_tm
@@ -93,11 +100,14 @@ let ipow_base_const_le = prove
   (`!e. &0 <= &base_const ipow e`,
    SIMP_TAC[REAL_LT_IMP_LE; ipow_base_const_lt]);;
 
+let nexp_mul_base_const_ipow = prove
+  (`!n k e. &(nexp n k) * &base_const ipow e = &n * &base_const ipow (pos_int k + e)`,
+   REWRITE_TAC[nexp; GSYM REAL_OF_NUM_MUL; GSYM REAL_OF_NUM_POW; GSYM IPOW_NUM] THEN
+     SIMP_TAC[GSYM REAL_MUL_ASSOC; pos_int; IPOW_ADD; base_const_not_zero]);;
+
 let fp_nexp = prove
   (`!s n k e. fp s (nexp n k) e = fp s n (pos_int k + e)`,
-   REWRITE_TAC[fp; nexp; GSYM REAL_OF_NUM_MUL; GSYM REAL_OF_NUM_POW; GSYM IPOW_NUM] THEN
-     SIMP_TAC[base_const_not_zero; pos_int; IPOW_ADD] THEN
-     REAL_ARITH_TAC);;
+   REWRITE_TAC[fp; nexp_mul_base_const_ipow]);;
 
 let nexp_suc = prove
   (`!n k. nexp n (SUC k) = base_const * nexp n k`,
@@ -110,8 +120,18 @@ let nexp_exp0 = prove
 let nexp0 = prove
   (`!k. nexp 0 k = 0`,
    REWRITE_TAC[nexp; MULT]);;
-   
 
+let nexp_exp_add = prove
+  (`!n k r. nexp n (k + r) = nexp (nexp n k) r`,
+   REWRITE_TAC[nexp; EXP_ADD; MULT_AC]);;
+
+let nexp_add = prove
+  (`!n m k. nexp (n + m) k = nexp n k + nexp m k`,
+   REWRITE_TAC[nexp] THEN ARITH_TAC);;
+
+let nexp_le = prove
+  (`!n m k. nexp n k <= nexp m k <=> n <= m`,
+   REWRITE_TAC[nexp; LE_MULT_RCANCEL; EXP_EQ_0; base_const; ARITH]);;
 
 (*******************)
 
@@ -124,6 +144,39 @@ let nexp_d0' = (th_rule o REWRITE_RULE[base_const; SYM def_array.(0)] o prove)
 let nexp0' = (th_num_rule o prove)
   (`nexp 0 k = nexp 0 0`,
    REWRITE_TAC[nexp0; nexp_exp0]);;
+
+let nexp_denorm' = 
+  (th_rule o PURE_REWRITE_RULE[zero_num; base_const; SYM def_array.(0)] o prove)
+    (`(k = zero_num <=> F) /\ PRE k = r
+	==> nexp n k = base_const * nexp n r + 0`,
+     REWRITE_TAC[GSYM nexp_suc; zero_num] THEN STRIP_TAC THEN 
+       EXPAND_TAC "r" THEN ASM_SIMP_TAC[ARITH_RULE `~(k = 0) ==> SUC (PRE k) = k`] THEN
+       ARITH_TAC);;
+
+let nexp_exp0' = th_num_rule nexp_exp0;;
+
+
+(* Denormalizes a given nexp term.            *)
+(* Note: the exponent must be normalized.     *)
+let rec nexp_denormalize tm =
+  let n_tm, k_tm = dest_nexp_term tm in
+    match k_tm with
+      | Const ("_0", _) ->
+	  INST[n_tm, n_var_num] nexp_exp0'
+      | _ ->
+	  let k_eq, flag = neq0 k_tm in
+	    if flag then
+	      error "nexp_denormalize: non-normalized exponent" [tm] [k_eq]
+	    else
+	      let pre_k = npre k_tm in
+	      let r_tm = rand (concl pre_k) in
+	      let th0 = INST[k_tm, k_var_num; r_tm, r_var_num; 
+			     n_tm, n_var_num] nexp_denorm' in
+	      let th1 = MY_PROVE_HYP k_eq (MY_PROVE_HYP pre_k th0) in
+	      let rtm = rand (concl th1) in
+	      let ltm, nexp_tm = dest_comb rtm in
+	      let th2 = nexp_denormalize nexp_tm in
+		TRANS th1 (AP_TERM ltm th2);;
 
 
 (* Normalizes a given nexp term.                          *)
@@ -367,6 +420,15 @@ let k_split_mul_hi = prove
      REWRITE_TAC[EXP_MULT; EXP_2] THEN
      ASM_SIMP_TAC[LE_MULT2; LT_IMP_LE]);;
 
+let k_split_mul_lo = prove
+  (`k_split k m m1 m2 /\ k_split k n n1 n2
+     ==> nexp (m1 * n1) (2 * k) + nexp (m1 * n2 + m2 * n1) k <= m * n`,
+   REWRITE_TAC[k_split; nexp; MULT_CLAUSES] THEN STRIP_TAC THEN ASM_REWRITE_TAC[] THEN
+     ONCE_REWRITE_TAC[ARITH_RULE `2 * k = k * 2`] THEN REWRITE_TAC[EXP_MULT] THEN
+     ARITH_TAC);;
+
+
+(**********************)
 
 let gen_k_split =
   let k_split_th = (DISCH `i < base_const <=> T` o th_rule o prove)
@@ -424,16 +486,152 @@ let split_nat =
       else
 	split k tm;;
 
-split_nat 2 (mk_small_nat 335235);;
+(*
+split_nat 1 (mk_small_nat 3352);;
 
 show_result := false;;
-(* 100: 0.430 *)
+(* 100: 0.312 *)
 ntest1_new 10 "../tests/data/nat10_small.txt" (split_nat 3);;
+*)
 
 
-install_user_printer;;
+(*********************************)
+(* Faster(?) nmul_lo and nmul_hi *)
+(*********************************)
 
-let x = 2;;
+let k_split_mul_lo' = (th_rule o prove)
+  (`k_split k m m1 m2 /\ k_split k n n1 n2 /\
+     m1 * n1 = r1 /\ m1 * n2 = r2 /\ m2 * n1 = r3 /\ r2 + r3 = r4 /\
+      nexp t q <= nexp r1 k + r4 /\ k + q = e
+	  ==> nexp t e <= m * n`,
+   STRIP_TAC THEN MP_TAC k_split_mul_lo THEN ASM_REWRITE_TAC[] THEN DISCH_TAC THEN
+     MATCH_MP_TAC LE_TRANS THEN EXISTS_TAC `nexp r1 (2 * k) + nexp r4 k` THEN
+     ASM_REWRITE_TAC[MULT_2; nexp_exp_add; GSYM nexp_add] THEN
+     EXPAND_TAC "e" THEN SUBST1_TAC (ARITH_RULE `k + q = q + k:num`) THEN
+     ASM_REWRITE_TAC[nexp_exp_add; nexp_le]);;
+
+let k_split_mul_hi' = (th_rule o prove)
+  (`k_split k m m1 m2 /\ k_split k n n1 n2 /\
+     m1 * n1 = r1 /\ m1 * n2 = r2 /\ m2 * n1 = r3 /\ r2 + r3 = r4 /\ SUC r1 = r5 /\
+      nexp r5 k + r4 <= nexp t q /\ k + q = e
+	  ==> m * n <= nexp t e`,
+   STRIP_TAC THEN MP_TAC k_split_mul_hi THEN ASM_REWRITE_TAC[] THEN DISCH_TAC THEN
+     MATCH_MP_TAC LE_TRANS THEN EXISTS_TAC `nexp r5 (2 * k) + nexp r4 k` THEN
+     ASM_REWRITE_TAC[MULT_2; nexp_exp_add; GSYM nexp_add] THEN
+     EXPAND_TAC "e" THEN SUBST1_TAC (ARITH_RULE `k + q = q + k:num`) THEN
+     ASM_REWRITE_TAC[nexp_exp_add; nexp_le]);;
+
+
+let nexp_add_num nexp_tm tm =
+  let denorm_th = nexp_denormalize nexp_tm in
+  let add_th = nadd (rand (concl denorm_th)) tm in
+    match concl add_th with
+      | Comb (Comb (_, Comb (Comb (op_tm, _), rtm)), _) ->
+	  TRANS (AP_THM (AP_TERM op_tm denorm_th) rtm) add_th
+      | _ -> error "nexp_add_num" [nexp_tm; tm] [add_th];;
+
+
+let nmul_lo2 p m_tm n_tm =
+  let a = size_nat m_tm and
+      b = size_nat n_tm in
+  let k = min (a - 1) (min (b - 1) ((a + b - p - 1) / 2)) in
+    if k <= 1 then
+      nmul_lo p m_tm n_tm
+    else
+      let m_split = split_nat k m_tm and
+	  n_split = split_nat k n_tm in
+      let k_tm, _, m1_tm, m2_tm = dest_k_split (concl m_split) and
+	  _, _, n1_tm, n2_tm = dest_k_split (concl n_split) in
+      let mul_r1 = nmul m1_tm n1_tm and
+	  mul_r2 = nmul m1_tm n2_tm and
+	  mul_r3 = nmul m2_tm n1_tm in
+      let r1_tm = rand (concl mul_r1) and
+	  r2_tm = rand (concl mul_r2) and
+	  r3_tm = rand (concl mul_r3) in
+      let add_r4 = nadd r2_tm r3_tm in
+      let r4_tm = rand (concl add_r4) in
+      let nexp_tm = mk_nexp_term r1_tm k_tm in
+      let add_lo = make_lo_bin_op nexp_add_num p nexp_tm r4_tm in
+      let t_tm, q_tm = dest_nexp_term (lhand (concl add_lo)) in
+      let add_e = nadd k_tm q_tm in
+      let e_tm = rand (concl add_e) in
+      let th0 = INST[k_tm, k_var_num; q_tm, q_var_num; e_tm, e_var_num;
+		     m_tm, m_var_num; m1_tm, m1_var_num; m2_tm, m2_var_num;
+		     n_tm, n_var_num; n1_tm, n1_var_num; n2_tm, n2_var_num;
+		     r1_tm, r1_var_num; r2_tm, r2_var_num; r3_tm, r3_var_num;
+		     r4_tm, r4_var_num; t_tm, t_var_num] k_split_mul_lo' in
+	itlist MY_PROVE_HYP [m_split; n_split; mul_r1; mul_r2; mul_r3; 
+			     add_r4; add_lo; add_e] th0;;
+
+let nmul_hi2 p m_tm n_tm =
+  let a = size_nat m_tm and
+      b = size_nat n_tm in
+  let k = min (a - 1) (min (b - 1) ((a + b - p - 1) / 2)) in
+    if k <= 1 then
+      nmul_hi p m_tm n_tm
+    else
+      let m_split = split_nat k m_tm and
+	  n_split = split_nat k n_tm in
+      let k_tm, _, m1_tm, m2_tm = dest_k_split (concl m_split) and
+	  _, _, n1_tm, n2_tm = dest_k_split (concl n_split) in
+      let mul_r1 = nmul m1_tm n1_tm and
+	  mul_r2 = nmul m1_tm n2_tm and
+	  mul_r3 = nmul m2_tm n1_tm in
+      let r1_tm = rand (concl mul_r1) and
+	  r2_tm = rand (concl mul_r2) and
+	  r3_tm = rand (concl mul_r3) in
+      let add_r4 = nadd r2_tm r3_tm in
+      let r4_tm = rand (concl add_r4) in
+      let suc_r5 = nsuc r1_tm in
+      let r5_tm = rand (concl suc_r5) in
+      let nexp_tm = mk_nexp_term r5_tm k_tm in
+      let add_hi = make_hi_bin_op nexp_add_num p nexp_tm r4_tm in
+      let t_tm, q_tm = dest_nexp_term (rand (concl add_hi)) in
+      let add_e = nadd k_tm q_tm in
+      let e_tm = rand (concl add_e) in
+      let th0 = INST[k_tm, k_var_num; q_tm, q_var_num; e_tm, e_var_num;
+		     m_tm, m_var_num; m1_tm, m1_var_num; m2_tm, m2_var_num;
+		     n_tm, n_var_num; n1_tm, n1_var_num; n2_tm, n2_var_num;
+		     r1_tm, r1_var_num; r2_tm, r2_var_num; r3_tm, r3_var_num;
+		     r4_tm, r4_var_num; r5_tm, r5_var_num; t_tm, t_var_num] k_split_mul_hi' in
+	itlist MY_PROVE_HYP [m_split; n_split; mul_r1; mul_r2; mul_r3; 
+			     add_r4; suc_r5; add_hi; add_e] th0;;
+
+
+(*
+(* 100: 3.804 *)
+ntest2_new 10 "../tests/data/nat10_small.txt" (nmul_lo 3);;
+(* 100: 3.693 *)
+ntest2_new 10 "../tests/data/nat10_small.txt" (nmul_lo 5);;
+
+(* 100: 3.129 *)
+ntest2_new 10 "../tests/data/nat10_small.txt" (nmul_lo2 3);;
+(* 100: 3.516 *)
+ntest2_new 10 "../tests/data/nat10_small.txt" (nmul_lo2 5);;
+
+
+(* 100: 3.870 *)
+ntest2_new 10 "../tests/data/nat10_small.txt" (nmul_hi 3);;
+(* 100: 3.751 *)
+ntest2_new 10 "../tests/data/nat10_small.txt" (nmul_hi 5);;
+
+(* 100: 3.243 *)
+ntest2_new 10 "../tests/data/nat10_small.txt" (nmul_hi2 3);;
+(* 100: 3.598 *)
+ntest2_new 10 "../tests/data/nat10_small.txt" (nmul_hi2 5);;
+
+
+
+let tm1 = mk_small_nat 3435325436 and
+    tm2 = mk_small_nat 9994573532;;
+
+test 1000 (nmul_hi2 5 tm1) tm2;;
+test 1000 (nmul_hi 5 tm1) tm2;;
+
+test 1000 (nmul_lo2 5 tm1) tm2;;
+test 1000 (nmul_lo 5 tm1) tm2;;
+*)
+
 
 
 (***********************)
@@ -576,7 +774,7 @@ let fmul_eq f1 f2 =
 	  let th1 = INST ((m_tm, m_var_num) :: (e_tm, e_var_int) :: insts) th0 in
 	    MY_PROVE_HYP m_th (MY_PROVE_HYP e_th th1);;
 
-let fmul_hi p f1 f2 =
+let fmul_hi_gen nmul_lo nmul_hi p f1 f2 =
   let s1, m1, e1 = dest_fp_term f1 and
       s2, m2, e2 = dest_fp_term f2 in
   let insts = [m1, m1_var_num; e1, e1_var_int;
@@ -617,7 +815,7 @@ let fmul_hi p f1 f2 =
 			  (r_tm, r_var_int) :: (e_tm, e_var_int) :: insts) th0 in
 	    MY_PROVE_HYP mul_th (MY_PROVE_HYP e_th (MY_PROVE_HYP r_th th1));;
 
-let fmul_lo p f1 f2 =
+let fmul_lo_gen nmul_lo nmul_hi p f1 f2 =
   let s1, m1, e1 = dest_fp_term f1 and
       s2, m2, e2 = dest_fp_term f2 in
   let insts = [m1, m1_var_num; e1, e1_var_int;
@@ -658,56 +856,27 @@ let fmul_lo p f1 f2 =
 			  (r_tm, r_var_int) :: (e_tm, e_var_int) :: insts) th0 in
 	    MY_PROVE_HYP mul_th (MY_PROVE_HYP e_th (MY_PROVE_HYP r_th th1));;
 
+let fmul_lo1 = fmul_lo_gen nmul_lo nmul_hi;;
 
+let fmul_lo2 = fmul_lo_gen nmul_lo2 nmul_hi2;;
+
+let fmul_hi1 = fmul_hi_gen nmul_lo nmul_hi;;
+
+let fmul_hi2 = fmul_hi_gen nmul_lo2 nmul_hi2;;
+
+let fmul_lo = fmul_lo1 and
+    fmul_hi = fmul_hi1;;
+
+(*
 fmul_hi 2 (mk_small_fp (240024, 16))
           (mk_small_fp (3353, -17));;
 
+let x = 2;;
+*)
 
 (***********************************)
 
-let decode_fp str =
-  let m_str, e_str = split_at str ',' in
-    mk_fp (Num.num_of_string m_str, Num.num_of_string e_str);;
-
-let convert_fp_binop_data str =
-  try
-    let p_str, str = split_at str ':' in
-    let f1_str, f2_str = split_at str ';' in
-      int_of_string p_str, decode_fp f1_str, decode_fp f2_str
-  with Failure msg ->
-    failwith str;;
-
-let fp_test rep data f =
-  run_tests rep data I convert_fp_binop_data I
-    ~result:!show_result (uncurry3 f);;
-
-show_result := true;;
-show_result := false;;
-
-
-ftest2 10 "../tests/log_sin_cos/mul_lo.log" Arith_float.float_mul_lo;;
-fp_test 10 "../tests/log_sin_cos/mul_lo.log" fmul_lo;;
-
-ftest2 10 "../tests/log_poly/mul_lo.log" Arith_float.float_mul_lo;;
-fp_test 10 "../tests/log_poly/mul_lo.log" fmul_lo;;
-
-ftest2 1 "../tests/log_big/mul_lo.log" Arith_float.float_mul_lo;;
-fp_test 1 "../tests/log_big/mul_lo.log" fmul_lo;;
-
-
-ftest2 10 "../tests/log_sin_cos/mul_hi.log" Arith_float.float_mul_hi;;
-fp_test 10 "../tests/log_sin_cos/mul_hi.log" fmul_hi;;
-
-ftest2 10 "../tests/log_poly/mul_hi.log" Arith_float.float_mul_hi;;
-fp_test 10 "../tests/log_poly/mul_hi.log" fmul_hi;;
-
-ftest2 1 "../tests/log_big/mul_hi.log" Arith_float.float_mul_hi;;
-fp_test 1 "../tests/log_big/mul_hi.log" fmul_hi;;
-
-
-
-
-
+(*
 let num_exp_test rep data f =
   run_tests rep data mk_nums (rand o Arith_nat.mk_numeral_array) I
     ~result:!show_result f;;
@@ -741,3 +910,79 @@ nexp_test 10 "../tests/data/nat10_small.txt" (nexp_lo pp);;
 nexp_test 10 "../tests/data/nat10_small.txt" (nexp_lo_normal pp);;
 
 num_exp_test 10 "../tests/data/nat10_small.txt" (Arith_float.lo_num_conv pp);;
+
+
+test 10000 nexp_denormalize (replace_numerals `nexp 3553 5`);;
+let tm = Arith_float.mk_num_exp 
+  (rand (Arith_nat.mk_small_numeral_array 3553))
+  (rand (Arith_nat.mk_small_numeral_array 5));;
+
+test 10000 Arith_float.denormalize tm;;
+
+*)
+
+
+(*********************)
+
+let fp_add_same_eq = prove
+  (`e1 - e2 = pos_int k
+     ==> fp s m1 e1 + fp s m2 e2 =
+	 fp s (nexp m1 k + m2) e2`,
+   REWRITE_TAC[pos_int; fp; nexp] THEN STRIP_TAC THEN
+     SUBGOAL_THEN `e2 = e1 - &k:int` ASSUME_TAC THENL [ ASM_ARITH_TAC; ALL_TAC ] THEN
+     ASM_SIMP_TAC[IPOW_SUB; base_const_not_zero] THEN
+     ASM_REWRITE_TAC[GSYM REAL_OF_NUM_ADD; GSYM REAL_OF_NUM_MUL; GSYM REAL_OF_NUM_POW] THEN
+     SUBGOAL_THEN `&base_const pow k * &base_const ipow (-- &k) = &1` MP_TAC THENL [
+       SIMP_TAC[GSYM IPOW_NUM; GSYM IPOW_SUB; base_const_not_zero] THEN
+	 REWRITE_TAC[INT_SUB_REFL; IPOW_0];
+       ALL_TAC
+     ] THEN
+     CONV_TAC REAL_FIELD);;
+
+let fp_add_hi_ff_e2 = prove
+  (`e1 - e2 = pos_int k /\
+    nexp m1 k + m2 <= nexp m q /\
+    pos_int q + e2 = e
+	==> fp F m1 e1 + fp F m2 e2 <= fp F m e`,
+   STRIP_TAC THEN ASM_SIMP_TAC[fp_add_same_eq] THEN
+     REWRITE_TAC[fp; REAL_MUL_LID] THEN
+     MATCH_MP_TAC REAL_LE_TRANS THEN EXISTS_TAC `&(nexp m q) * &base_const ipow e2` THEN
+     CONJ_TAC THENL [
+       MATCH_MP_TAC REAL_LE_RMUL THEN 
+	 ASM_REWRITE_TAC[ipow_base_const_le; REAL_OF_NUM_LE];
+       ALL_TAC
+     ] THEN
+     ASM_REWRITE_TAC[nexp_mul_base_const_ipow; REAL_LE_REFL]);;
+
+let fp_add_hi_ff_e1 = prove
+  (`e2 - e1 = pos_int k /\
+    nexp m2 k + m1 <= nexp m q /\
+    pos_int q + e1 = e
+	==> fp F m1 e1 + fp F m2 e2 <= fp F m e`,
+   STRIP_TAC THEN ONCE_REWRITE_TAC[REAL_ADD_AC] THEN
+     MATCH_MP_TAC fp_add_hi_ff_e2 THEN ASM_REWRITE_TAC[]);;
+
+let fp_add_hi_tt_e2 = prove
+  (`e1 - e2 = pos_int k /\
+    nexp m q <= nexp m1 k + m2 /\
+    pos_int q + e2 = e
+	==> fp T m1 e1 + fp T m2 e2 <= fp T m e`,
+   STRIP_TAC THEN ASM_SIMP_TAC[fp_add_same_eq] THEN
+     REWRITE_TAC[fp; REAL_ARITH `-- &1 * a <= -- &1 * b <=> b <= a`] THEN
+     MATCH_MP_TAC REAL_LE_TRANS THEN EXISTS_TAC `&(nexp m q) * &base_const ipow e2` THEN
+     CONJ_TAC THENL [
+       ASM_REWRITE_TAC[nexp_mul_base_const_ipow; REAL_LE_REFL];
+       ALL_TAC
+     ] THEN
+     MATCH_MP_TAC REAL_LE_RMUL THEN
+     ASM_REWRITE_TAC[ipow_base_const_le; REAL_OF_NUM_LE]);;
+
+let fp_add_hi_tt_e1 = prove
+  (`e2 - e1 = pos_int k /\
+    nexp m q <= nexp m2 k + m1 /\
+    pos_int q + e1 = e
+	==> fp T m1 e1 + fp T m2 e2 <= fp T m e`,
+   STRIP_TAC THEN ONCE_REWRITE_TAC[REAL_ADD_AC] THEN
+     MATCH_MP_TAC fp_add_hi_tt_e2 THEN ASM_REWRITE_TAC[]);;
+
+

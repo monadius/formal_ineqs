@@ -1533,6 +1533,13 @@ move => y [p] [[ps] fpt] ->.
 by rewrite partial_uni_compose ?df ?du.
 Qed.
 
+(* abs *)
+Lemma diff2_abs_pos_compose : `&0 < f x ==> diff2 f x ==> diff2 (abs o f) x`.
+Proof. by move => /diff2_abs_pos du df; rewrite diff2_uni_compose. Qed.
+
+Lemma diff2_abs_neg_compose : `f x < &0 ==> diff2 f x ==> diff2 (abs o f) x`.
+Proof. by move => /diff2_abs_neg du df; rewrite diff2_uni_compose. Qed.
+
 (* pow *)
 Lemma diff2_pow_compose n : `diff2 f x ==> diff2 ((\x. x pow n) o f) x`.
 Proof. by move => df; rewrite diff2_uni_compose diff2_pow_x. Qed.
@@ -1641,6 +1648,21 @@ Lemma diff2_domain_sqrt_compose : `m_bounded_on_int f domain bounds ==>
 	interval_pos bounds ==> diff2_domain domain (sqrt o f)`.
 move: d2f; rewrite m_bounded_on_int !diff2_domain => d2f ineq n0 x x_in.
 by rewrite diff2_sqrt_compose d2f // andbT (interval_arith_pos (ineq x_in)).
+Qed.
+
+(* abs *)
+Lemma diff2_domain_abs_pos_compose : `m_bounded_on_int f domain bounds ==>
+	interval_pos bounds ==> diff2_domain domain (abs o f)`.
+Proof.
+move: d2f; rewrite m_bounded_on_int !diff2_domain => d2f ineq n0 x x_in.
+by rewrite diff2_abs_pos_compose d2f // andbT (interval_arith_pos (ineq x_in)).
+Qed.
+
+Lemma diff2_domain_abs_neg_compose : `m_bounded_on_int f domain bounds ==>
+	interval_neg bounds ==> diff2_domain domain (abs o f)`.
+Proof.
+move: d2f; rewrite m_bounded_on_int !diff2_domain => d2f ineq n0 x x_in.
+by rewrite diff2_abs_neg_compose d2f // andbT (interval_arith_neg (ineq x_in)).
 Qed.
 
 (* pow *)
@@ -1979,6 +2001,32 @@ rewrite REAL_CONTINUOUS_ATREAL_COMPOSE /= REAL_CONTINUOUS_POW ?REAL_CONTINUOUS_A
 by rewrite REAL_CONTINUOUS_AT_SQRT REAL_POW_LT.
 Qed.
 
+(* abs *)
+
+Lemma diff2c_abs_pos_compose f : `&0 < f x ==> diff2c f x ==> diff2c (abs o f) x`.
+Proof.
+move => fn0 d2f; rewrite diff2c_uni_compose.
+rewrite (diff2_abs_pos fn0) d2f /=.
+apply: real_cont_atreal_local.
+exists `\x. &0` `{x | x > &0}`.
+rewrite REAL_OPEN_HALFSPACE_GT !IN_ELIM_THM /= !real_gt; split; last first.
+  by move => y [z] [z0] ->; rewrite second_derivative_abs_pos.
+rewrite REAL_CONTINUOUS_CONST andTb.
+by exists `f x`.
+Qed.
+
+Lemma diff2c_abs_neg_compose f : `f x < &0 ==> diff2c f x ==> diff2c (abs o f) x`.
+Proof.
+move => fn0 d2f; rewrite diff2c_uni_compose.
+rewrite (diff2_abs_neg fn0) d2f /=.
+apply: real_cont_atreal_local.
+exists `\x. &0` `{x | x < &0}`.
+rewrite REAL_OPEN_HALFSPACE_LT !IN_ELIM_THM /=; split; last first.
+  by move => y [z] [z0] ->; rewrite second_derivative_abs_neg.
+rewrite REAL_CONTINUOUS_CONST andTb.
+by exists `f x`.
+Qed.
+
 (* pow *)
 
 Lemma diff2c_pow_compose n f : `diff2c f x ==> diff2c ((\x. x pow n) o f) x`.
@@ -2196,6 +2244,21 @@ move: d2f; rewrite m_bounded_on_int !diff2c_domain => d2f ineq n0 x x_in.
 by rewrite diff2c_sqrt_compose d2f // andbT (interval_arith_pos (ineq x_in)).
 Qed.
 
+(* abs *)
+Lemma diff2c_domain_abs_pos_compose : `m_bounded_on_int f domain bounds ==>
+	interval_pos bounds ==> diff2c_domain domain (abs o f)`.
+Proof.
+move: d2f; rewrite m_bounded_on_int !diff2c_domain => d2f ineq n0 x x_in.
+by rewrite diff2c_abs_pos_compose d2f // andbT (interval_arith_pos (ineq x_in)).
+Qed.
+
+Lemma diff2c_domain_abs_neg_compose : `m_bounded_on_int f domain bounds ==>
+	interval_neg bounds ==> diff2c_domain domain (abs o f)`.
+Proof.
+move: d2f; rewrite m_bounded_on_int !diff2c_domain => d2f ineq n0 x x_in.
+by rewrite diff2c_abs_neg_compose d2f // andbT (interval_arith_neg (ineq x_in)).
+Qed.
+
 (* pow *)
 Lemma diff2c_domain_pow_compose n : `diff2c_domain domain ((\x. x pow n) o f)`.
 Proof. by move: d2f; rewrite !diff2c_domain => d2f x x_in; rewrite diff2c_pow_compose d2f. Qed.
@@ -2384,6 +2447,27 @@ Lemma m_taylor_sqrt_compose :
 Proof.
 move => bf fn0 lin second; rewrite m_taylor_interval.
 by rewrite (diff2c_domain_sqrt_compose d2f bf).
+Qed.
+
+(* abs *)
+Lemma m_taylor_abs_pos_compose :
+	`m_bounded_on_int f domain f_bounds ==> interval_pos f_bounds ==>
+	m_lin_approx (abs o f) y bounds d_bounds_list ==>
+	second_bounded (abs o f) domain dd_bounds_list ==>
+	m_taylor_interval (abs o f) domain y w bounds d_bounds_list dd_bounds_list`.
+Proof.
+move => bf fn0 lin second; rewrite m_taylor_interval.
+by rewrite (diff2c_domain_abs_pos_compose d2f bf).
+Qed.
+
+Lemma m_taylor_abs_neg_compose :
+	`m_bounded_on_int f domain f_bounds ==> interval_neg f_bounds ==>
+	m_lin_approx (abs o f) y bounds d_bounds_list ==>
+	second_bounded (abs o f) domain dd_bounds_list ==>
+	m_taylor_interval (abs o f) domain y w bounds d_bounds_list dd_bounds_list`.
+Proof.
+move => bf fn0 lin second; rewrite m_taylor_interval.
+by rewrite (diff2c_domain_abs_neg_compose d2f bf).
 Qed.
 
 (* pow *)

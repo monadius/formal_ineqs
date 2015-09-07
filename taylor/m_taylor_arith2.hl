@@ -32,7 +32,6 @@ open M_taylor_arith;;
 open Misc_vars;;
 
 
-
 (**************************************)
 let mk_vars n name ty = map (fun i -> mk_var (name^string_of_int i, ty)) (1--n);;
 
@@ -331,7 +330,7 @@ let eval_m_taylor_mul2 n p_lin p_second taylor1_th taylor2_th =
 (* neg                     *)
 (* ----------------------- *)
 
-let eval_m_taylor_neg2 n taylor1_th =
+let eval_m_taylor_neg2_raw norm_flag n taylor1_th =
   let domain_th, diff2_f1_th, lin1_th, second1_th = dest_m_taylor_thms n taylor1_th in
   let f1_tm = (rand o concl) diff2_f1_th in
   let domain_tm, y_tm, w_tm = dest_m_cell_domain (concl domain_th) in
@@ -373,8 +372,51 @@ let eval_m_taylor_neg2 n taylor1_th =
 	      INST([f1_tm, f_var; 
 		   domain_tm, domain_var; y_tm, y_var; w_tm, w_var;
 		   bounds_tm, bounds_var] @ inst_list)) neg_ths_array.(n) in
-  let eq_th = unary_beta_gen_eq f1_tm x_var neg_op_real in
-    m_taylor_interval_norm th eq_th;;
+    if norm_flag then
+      let eq_th = unary_beta_gen_eq f1_tm x_var neg_op_real in
+	m_taylor_interval_norm th eq_th
+    else
+      th;;
+
+let eval_m_taylor_neg2 = eval_m_taylor_neg2_raw true;;
+
+
+(* ----------------------- *)
+(* abs                     *)
+(* ----------------------- *)
+
+let eval_m_taylor_abs2 n p_second taylor1_th = 
+  let f1_bound0 = eval_m_taylor_bound n p_second taylor1_th in
+  let f_bounds_tm = (rand o rand o snd o dest_forall o concl) f1_bound0 in
+  let cond_th, taylor_th, th0, 
+    (f1_tm, domain_tm, y_tm, w_tm, bounds_tm, d_tm, dd_tm) = 
+    try
+      let cond_th = check_interval_pos f_bounds_tm in
+	cond_th, taylor1_th, MK_M_TAYLOR_ABS_POS', dest_m_taylor (concl taylor1_th)
+    with Failure _ ->
+      let cond_th = check_interval_neg f_bounds_tm in
+      let neg_taylor = eval_m_taylor_neg2_raw false n taylor1_th in
+      let neg_f1_tm, domain_tm, y_tm, w_tm, bounds_tm, d_tm, dd_tm =
+	dest_m_taylor (concl neg_taylor) in
+      let f1_tm = (rator o rand o snd o dest_abs) neg_f1_tm in
+	cond_th, neg_taylor, MK_M_TAYLOR_ABS_NEG',
+      (f1_tm, domain_tm, y_tm, w_tm, bounds_tm, d_tm, dd_tm) in
+  let ty = type_of y_tm in
+  let x_var = mk_var ("x", ty) and
+      y_var = mk_var ("y", ty) and
+      w_var = mk_var ("w", ty) and
+      f_var = mk_var ("f", type_of f1_tm) and
+      domain_var = mk_var ("domain", type_of domain_tm) in
+  let th1 = (MY_PROVE_HYP f1_bound0 o 
+	       MY_PROVE_HYP cond_th o
+	       MY_PROVE_HYP taylor_th o
+	       INST[f1_tm, f_var; f_bounds_tm, f_bounds_var; 
+		    domain_tm, domain_var; y_tm, y_var; w_tm, w_var;
+		    bounds_tm, bounds_var; d_tm, d_bounds_list_var; 
+		    dd_tm, dd_bounds_list_var] o
+	       INST_TYPE[n_type_array.(n), nty]) th0 in
+  let eq_th = unary_beta_gen_eq f1_tm x_var abs_tm in
+    m_taylor_interval_norm th1 eq_th;;
 
 
 (* ----------------------- *)
@@ -1259,10 +1301,25 @@ let dom_th = mk_m_center_domain 2 5 x_list z_list;;
 let dom_inf = Informal_taylor.mk_m_center_domain 5 x_inf y_inf;;
 
 
+let f1, f2 = mk_verification_functions_poly 5 `\x:real^2. x$1 - #1.1`;;
 
-let f1, f2 = mk_verification_functions_poly 5 `\x:real^2. x$1 pow 2 + x$2 + &10`;;
+let f1, f2 = mk_verification_functions_poly 5 `\x:real^2. x$1 pow 2 + x$2 - &10`;;
+
 let t_th = f1.taylor 5 5 dom_th;;
 let t_inf = f2.Informal_verifier.taylor 5 5 dom_inf;;
+
+eval_m_taylor_bound 2 5 t_th;;
+
+eval_m_taylor_abs2 2 5 t_th;;
+Informal_taylor.eval_m_taylor_abs 5 t_inf;;
+
+let t2_th = eval_m_taylor_neg2 2 t_th;;
+eval_m_taylor_abs2 2 5 (eval_m_taylor_abs2 2 5 t2_th);;
+
+let t2_inf = Informal_taylor.eval_m_taylor_neg t_inf;;
+Informal_taylor.eval_m_taylor_abs 5 (Informal_taylor.eval_m_taylor_abs 5 t2_inf);;
+
+eval_m_taylor_neg2_raw false 2 t_th;;
 
 eval_m_taylor_sqrt2 2 5 5 t_th;;
 

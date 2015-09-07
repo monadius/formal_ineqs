@@ -37,6 +37,9 @@ module type Informal_interval_sig =
     val le_interval : Informal_float.ifloat -> interval -> bool
     val ge_interval : Informal_float.ifloat -> interval -> bool
     val compare_interval : Informal_float.ifloat -> interval -> int
+      (* Returns -1 if the interval is negative, 1 if it is positive, and
+	 0 if it contains 0 *)
+    val compare0_interval : interval -> int
   end;;
 
 module Informal_interval : Informal_interval_sig = struct
@@ -217,7 +220,12 @@ let compare_interval x (lo, hi) =
   if le_float x lo then -1
   else if le_float hi x then 1
   else 0;;
-  
+
+(* compare0_interval *)
+let compare0_interval (lo, hi) =
+  if gt0_float lo then 1
+  else if lt0_float hi then -1
+  else 0;;
 
 end;;
 

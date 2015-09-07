@@ -274,6 +274,14 @@ let eval_m_taylor_neg taylor1 =
       ddf = map (map neg) taylor1.ddf;
     };;
 
+(* abs *)
+let eval_m_taylor_abs p_second ti =
+  let f1_bound = eval_m_taylor_bound p_second ti in
+    match (compare0_interval f1_bound) with
+      | -1 -> eval_m_taylor_neg ti
+      | 1 -> ti
+      | _ -> failwith "eval_m_taylor_abs: interval contains 0";;
+
 (* pow2 *)
 let eval_m_taylor_pow2 p_lin p_second ti =
   let n = ti.n in

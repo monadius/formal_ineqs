@@ -263,6 +263,21 @@ let check_interval_pos int_tm =
       (MY_PROVE_HYP gt_th o INST[lo, lo_var_real; hi, hi_var_real]) INTERVAL_POS';;
 
 
+(* ----------------------------------------- *)
+(* interval_neg                              *)
+(* ----------------------------------------- *)
+
+let INTERVAL_NEG' = (UNDISCH_ALL o prove)
+  (`(hi < &0 <=> T) ==> interval_neg (lo:real, hi:real)`, SIMP_TAC[interval_neg]);;
+
+
+let check_interval_neg int_tm =
+  let lo, hi = dest_pair int_tm in
+  let cmp_th = float_lt0 hi in
+    if (fst o dest_const o rand o concl) cmp_th <> "T" then
+      failwith "check_interval_neg: hi < &0 <=> F"
+    else
+      (MY_PROVE_HYP cmp_th o INST[lo, lo_var_real; hi, hi_var_real]) INTERVAL_NEG';;
 
 (* ----------------------------------------- *)
 (* interval_gt                              *)

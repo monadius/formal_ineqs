@@ -185,6 +185,14 @@ let rec mk_funs =
     (fun p1 p2 x ->
        let a = ti1 p1 p2 x in
 	 Informal_taylor.eval_m_taylor_neg a) in
+    (* abs *)
+  let mk_real_abs n (f1, ti1) =
+    (fun p1 p2 x -> 
+       let a = f1 p1 p2 x in
+	 eval_m_taylor_abs2 n p2 a),
+    (fun p1 p2 x ->
+       let a = ti1 p1 p2 x in
+	 Informal_taylor.eval_m_taylor_abs p2 a) in
     (* sqrt *)
   let mk_sqrt n (f1, ti1) =
     (fun p1 p2 x -> 
@@ -274,6 +282,7 @@ let rec mk_funs =
     (* unary operations *)
   let unary_ops =
     ["real_neg", mk_neg;
+     "real_abs", mk_real_abs;
      "sqrt", mk_sqrt;
      "exp", mk_exp;
      "log", mk_log;

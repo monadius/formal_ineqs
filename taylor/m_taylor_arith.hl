@@ -31,8 +31,8 @@ open Float_theory;;
 open M_taylor;;
 open Misc_vars;;
 
-
-let pow_tm = `pow` and
+let abs_tm = `abs` and
+    pow_tm = `pow` and
     sqrt_tm = `sqrt` and
     exp_tm = `exp` and
     log_tm = `log` and
@@ -752,6 +752,164 @@ let MK_M_TAYLOR_NEG' = (MY_RULE_FLOAT o prove)
      REWRITE_TAC[diff2c_domain_alt; diff2_domain] THEN
      DISCH_THEN (MP_TAC o SPEC `x:real^N` o CONJUNCT1) THEN ASM_REWRITE_TAC[] THEN DISCH_TAC THEN
      ASM_SIMP_TAC[second_partial_neg]);;
+
+(* abs *)
+
+let MK_M_TAYLOR_ABS_POS' = (MY_RULE_FLOAT o prove)
+  (`m_taylor_interval f domain (y:real^N) w bounds d_bounds_list dd_bounds_list ==>
+     (!x. x IN interval [domain] ==> interval_arith (f x) f_bounds) ==>
+     interval_pos f_bounds ==>
+     m_taylor_interval (\x. abs (f x)) domain y w bounds d_bounds_list dd_bounds_list`,
+   REWRITE_TAC[m_taylor_interval; m_lin_approx; second_bounded; ETA_AX] THEN
+     DISCH_THEN STRIP_ASSUME_TAC THEN REPEAT DISCH_TAC THEN ASM_REWRITE_TAC[] THEN
+     SUBGOAL_THEN `!x:real^N. x IN interval [domain] ==> &0 < f x` ASSUME_TAC THENL
+     [
+       GEN_TAC THEN DISCH_TAC THEN
+	 apply_tac interval_arith_pos THEN
+	 EXISTS_TAC `f_bounds:real#real` THEN
+	 ASM_REWRITE_TAC[] THEN
+	 FIRST_X_ASSUM MATCH_MP_TAC THEN ASM_REWRITE_TAC[];
+       ALL_TAC
+     ] THEN
+
+     SUBGOAL_THEN `&0 < f (y:real^N)` ASSUME_TAC THENL
+     [
+       FIRST_X_ASSUM MATCH_MP_TAC THEN
+	 MATCH_MP_TAC y_in_domain THEN EXISTS_TAC `w:real^N` THEN
+	 ASM_REWRITE_TAC[];
+       ALL_TAC
+     ] THEN
+
+     REPEAT STRIP_TAC THEN ASM_REWRITE_TAC[] THENL
+     [
+       UNDISCH_TAC `diff2c_domain domain (f:real^N->real)` THEN
+	 REWRITE_TAC[diff2c_domain] THEN REPEAT STRIP_TAC THEN
+	 ONCE_REWRITE_TAC[GSYM o_THM] THEN REWRITE_TAC[ETA_AX] THEN
+	 apply_tac diff2c_abs_pos_compose THEN CONJ_TAC THEN FIRST_X_ASSUM MATCH_MP_TAC THEN ASM_REWRITE_TAC[];
+       new_rewrite [] [`abs _`] (GSYM o_THM) THEN REWRITE_TAC[ETA_AX] THEN
+	 apply_tac diff_uni_compose THEN ASM_REWRITE_TAC[] THEN
+	 MATCH_MP_TAC REAL_DIFFERENTIABLE_AT_ABS_POS THEN ASM_REWRITE_TAC[];
+       ASM_SIMP_TAC[REAL_ARITH `&0 < a ==> abs a = a`];
+       new_rewrite [] [`abs _`] (GSYM o_THM) THEN REWRITE_TAC[ETA_AX] THEN
+	 MP_TAC (ISPECL [`y:real^N`; `f:real^N->real`] partial_uni_compose') THEN
+	 ASM_REWRITE_TAC[] THEN
+	 DISCH_THEN (MP_TAC o SPEC `abs`) THEN
+	 ANTS_TAC THENL
+	 [
+	   MATCH_MP_TAC REAL_DIFFERENTIABLE_AT_ABS_POS THEN ASM_REWRITE_TAC[];
+	   ALL_TAC
+	 ] THEN
+	 ASM_SIMP_TAC[derivative_abs_pos; REAL_MUL_LID];
+       ALL_TAC
+     ] THEN
+
+     UNDISCH_TAC `diff2c_domain domain (f:real^N->real)` THEN
+     REWRITE_TAC[diff2c_domain_alt; diff2_domain] THEN
+     DISCH_THEN (MP_TAC o SPEC `x:real^N` o CONJUNCT1) THEN ASM_REWRITE_TAC[] THEN DISCH_TAC THEN
+     MP_TAC (ISPECL [`x:real^N`; `f:real^N->real`] second_partial_uni_compose') THEN
+     ASM_REWRITE_TAC[] THEN
+     DISCH_THEN (MP_TAC o SPEC `abs`) THEN
+     ANTS_TAC THENL
+     [
+       MATCH_MP_TAC diff2_abs_pos THEN
+	 FIRST_X_ASSUM MATCH_MP_TAC THEN ASM_REWRITE_TAC[];
+       ALL_TAC
+     ] THEN
+
+     new_rewrite [] [`abs _`] (GSYM o_THM) THEN REWRITE_TAC[ETA_AX] THEN
+     ASM_SIMP_TAC[second_derivative_abs_pos; derivative_abs_pos] THEN DISCH_THEN (fun th -> ALL_TAC) THEN
+     REWRITE_TAC[REAL_ARITH `(&0 * a) * b + &1 * c = c`] THEN
+     ASM_SIMP_TAC[]);;
+
+let MK_M_TAYLOR_ABS_NEG' = (MY_RULE_FLOAT o prove)
+  (`m_taylor_interval (\x. --f x) domain (y:real^N) w bounds d_bounds_list dd_bounds_list ==>
+     (!x. x IN interval [domain] ==> interval_arith (f x) f_bounds) ==>
+     interval_neg f_bounds ==>
+     m_taylor_interval (\x. abs (f x)) domain y w bounds d_bounds_list dd_bounds_list`,
+   REWRITE_TAC[m_taylor_interval; m_lin_approx; second_bounded; ETA_AX] THEN
+     DISCH_THEN STRIP_ASSUME_TAC THEN REPEAT DISCH_TAC THEN ASM_REWRITE_TAC[] THEN
+     SUBGOAL_THEN `!x:real^N. x IN interval [domain] ==> f x < &0` ASSUME_TAC THENL
+     [
+       GEN_TAC THEN DISCH_TAC THEN
+	 apply_tac interval_arith_neg THEN
+	 EXISTS_TAC `f_bounds:real#real` THEN
+	 ASM_REWRITE_TAC[] THEN
+	 FIRST_X_ASSUM MATCH_MP_TAC THEN ASM_REWRITE_TAC[];
+       ALL_TAC
+     ] THEN
+
+     SUBGOAL_THEN `f (y:real^N) < &0` ASSUME_TAC THENL
+     [
+       FIRST_X_ASSUM MATCH_MP_TAC THEN
+	 MATCH_MP_TAC y_in_domain THEN EXISTS_TAC `w:real^N` THEN
+	 ASM_REWRITE_TAC[];
+       ALL_TAC
+     ] THEN
+
+     SUBGOAL_THEN `diff2c_domain domain (f:real^N->real)` ASSUME_TAC THENL [
+       SUBGOAL_THEN `f:real^N->real = (\x. -- (--f x))` (fun th -> ONCE_REWRITE_TAC[th]) THENL [
+	   REWRITE_TAC[REAL_NEG_NEG; ETA_AX];
+	   ALL_TAC
+	 ] THEN
+	 apply_tac diff2c_domain_neg THEN ASM_REWRITE_TAC[];
+       ALL_TAC
+     ] THEN
+
+     SUBGOAL_THEN `lift o (f:real^N->real) differentiable at y` ASSUME_TAC THENL [
+       SUBGOAL_THEN `lift o (f:real^N->real) = (\x. --((lift o (\t. --f t)) x))` ASSUME_TAC THENL [
+	 REWRITE_TAC[FUN_EQ_THM; o_THM; LIFT_NEG; VECTOR_NEG_NEG];
+	 ALL_TAC
+       ] THEN
+	 POP_ASSUM (fun th -> ONCE_REWRITE_TAC[th]) THEN
+	 MATCH_MP_TAC DIFFERENTIABLE_NEG THEN
+	 ASM_REWRITE_TAC[ETA_AX];
+       ALL_TAC
+     ] THEN
+       
+     REPEAT STRIP_TAC THEN ASM_REWRITE_TAC[] THENL
+     [
+       UNDISCH_TAC `diff2c_domain domain (f:real^N->real)` THEN
+	 REWRITE_TAC[diff2c_domain] THEN REPEAT STRIP_TAC THEN
+	 ONCE_REWRITE_TAC[GSYM o_THM] THEN REWRITE_TAC[ETA_AX] THEN
+	 apply_tac diff2c_abs_neg_compose THEN ASM_SIMP_TAC[];
+
+       new_rewrite [] [`abs _`] (GSYM o_THM) THEN REWRITE_TAC[ETA_AX] THEN
+	 apply_tac diff_uni_compose THEN ASM_REWRITE_TAC[] THEN
+	 MATCH_MP_TAC REAL_DIFFERENTIABLE_AT_ABS_NEG THEN ASM_REWRITE_TAC[];
+
+       ASM_SIMP_TAC[REAL_ARITH `a < &0 ==> abs a = --a`];
+
+       new_rewrite [] [`abs _`] (GSYM o_THM) THEN REWRITE_TAC[ETA_AX] THEN
+	 MP_TAC (ISPECL [`y:real^N`; `f:real^N->real`] partial_uni_compose') THEN
+	 ASM_REWRITE_TAC[] THEN
+	 DISCH_THEN (MP_TAC o SPEC `abs`) THEN
+	 ANTS_TAC THENL
+	 [
+	   MATCH_MP_TAC REAL_DIFFERENTIABLE_AT_ABS_NEG THEN ASM_REWRITE_TAC[];
+	   ALL_TAC
+	 ] THEN
+	 ASM_SIMP_TAC[derivative_abs_neg; GSYM REAL_NEG_MINUS1; GSYM partial_neg];
+       ALL_TAC
+     ] THEN
+
+     UNDISCH_TAC `diff2c_domain domain (f:real^N->real)` THEN
+     REWRITE_TAC[diff2c_domain_alt; diff2_domain] THEN
+     DISCH_THEN (MP_TAC o SPEC `x:real^N` o CONJUNCT1) THEN ASM_REWRITE_TAC[] THEN DISCH_TAC THEN
+     MP_TAC (ISPECL [`x:real^N`; `f:real^N->real`] second_partial_uni_compose') THEN
+     ASM_REWRITE_TAC[] THEN
+     DISCH_THEN (MP_TAC o SPEC `abs`) THEN
+     ANTS_TAC THENL
+     [
+       MATCH_MP_TAC diff2_abs_neg THEN
+	 FIRST_X_ASSUM MATCH_MP_TAC THEN ASM_REWRITE_TAC[];
+       ALL_TAC
+     ] THEN
+
+     new_rewrite [] [`abs _`] (GSYM o_THM) THEN REWRITE_TAC[ETA_AX] THEN
+     ASM_SIMP_TAC[second_derivative_abs_neg; derivative_abs_neg] THEN DISCH_THEN (K ALL_TAC) THEN
+     REWRITE_TAC[REAL_ARITH `(&0 * a) * b + -- &1 * c = --c`] THEN
+     ASM_SIMP_TAC[GSYM second_partial_neg]);;
+
 
 (* pow *)
 

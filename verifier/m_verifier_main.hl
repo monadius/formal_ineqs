@@ -397,19 +397,40 @@ let mk_float_domain pp (xx_tm, zz_tm) =
 
 
 
-(* Given a term a < b, returns the theorem |- a - b < &0 <=> a < b *)
+(* Given a term a < b, returns the theorem |- a - b < &0 ==> a < b *)
 (* Also, deals with > and / *)
 (* A user can provide additional rewrite theorems *)
 let mk_standard_ineq =
   let lemma_lt = REAL_ARITH `a < b <=> a - b < &0` and
-      lemma_le = REAL_ARITH `a <= b <=> a - b <= &0` in
+      lemma_le = REAL_ARITH `a <= b <=> a - b <= &0` and
+      lemma_imp = TAUT `(P <=> Q) ==> (Q ==> P)` in
     fun thms tm ->
-      let th0 = (REWRITE_CONV([real_gt; real_div] @ thms) THENC DEPTH_CONV let_CONV) tm in
+      let th0 = (REWRITE_CONV([real_gt; real_ge; real_div] @ thms) 
+		   THENC DEPTH_CONV let_CONV) tm in
       let rhs = rand (concl th0) in
       let th1 = (ONCE_REWRITE_CONV[lemma_le] THENC 
 		   ONCE_REWRITE_CONV[lemma_lt] THENC 
 		   PURE_REWRITE_CONV[REAL_NEG_0; REAL_SUB_RZERO; REAL_SUB_LZERO]) rhs in
-	TRANS th0 th1;;
+      let th2 = TRANS th0 th1 in
+      let ineqs = striplist dest_disj (rand (concl th2)) in
+      let le_flags = map (can (dest_binop le_op_real)) ineqs in
+	if exists I le_flags then 
+	  let q_le_tms, q_lt_tms = unzip 
+	    (map2 (fun i b -> 
+		     let var = mk_var ("Q" ^ string_of_int i, real_ty) in
+		       mk_binop (if b then le_op_real else lt_op_real) var `&0`,
+  		       mk_binop lt_op_real var `&0`)
+	       (1 -- length le_flags) le_flags) in
+	  let qs_le = end_itlist (curry mk_disj) q_le_tms and
+	      qs_lt = end_itlist (curry mk_disj) q_lt_tms and
+	      p_tm = `P:bool` in
+	    (* |- (P <=> Q1 <= &0 \/ ...) ==> (Q1 < &0 \/ ... ==> P) *)
+	  let q_th = MESON[REAL_LT_IMP_LE] 
+	    (mk_imp (mk_eq (p_tm, qs_le), mk_imp (qs_lt, p_tm))) in
+	    (* |- Q1 < &0 \/ ... ==> P *)
+	    MATCH_MP q_th th2
+	else
+	  MATCH_MP lemma_imp th2;;
 
 (* Converts a term in the form `x + y` into the term `\x:real^2. x$1 + x$2` *)
 let expr_to_vector_fun =
@@ -484,16 +505,17 @@ let dest_ineq ineq_tm =
 (*********************************)
 
 (* Normalizes a verification result *)
-let normalize_result norm_flag v1 eq_th1 domain_sub_th pass_thm =
+let normalize_result norm_flag v1 imp_th1 domain_sub_th pass_thm =
   let th0 = REWRITE_RULE[m_cell_pass] pass_thm in
   let n = (get_dim o fst o dest_forall o concl) th0 in
   let th1 = SPEC v1 th0 in
   let comp_thms = end_itlist CONJ (Array.to_list comp_thms_array.(n)) in
-  let th2 = REWRITE_RULE[comp_thms] th1 in
-  let th3 = (UNDISCH_ALL o REWRITE_RULE[GSYM eq_th1]) th2 in
+  let th2 = UNDISCH_ALL (REWRITE_RULE[comp_thms] th1) in
+  let th3 = MP imp_th1 th2 in
   let dom_th = (UNDISCH_ALL o SPEC v1 o REWRITE_RULE[SUBSET]) domain_sub_th in
   let th4 = (DISCH_ALL o MY_PROVE_HYP dom_th) th3 in
-  let th5 = REWRITE_RULE[IN_INTERVAL; dimindex_array.(n); gen_in_interval n; comp_thms] th4 in
+  let th5 = REWRITE_RULE[IN_INTERVAL; dimindex_array.(n); 
+			 gen_in_interval n; comp_thms] th4 in
     if norm_flag then GEN_ALL th5 else th4;;
 
 
@@ -501,14 +523,14 @@ let normalize_result norm_flag v1 eq_th1 domain_sub_th pass_thm =
 (* Returns the final theorem and verification statistics *)
 let verify_ineq0 params0 norm_flag pp ineq_tm var_names (lo_tm, hi_tm) rewrite_thms =
   let total_start = Unix.gettimeofday() in
-  let eq_th1 = mk_standard_ineq rewrite_thms ineq_tm in
-  let ineq_tm1 = (lhand o rand o concl) eq_th1 in
+  let imp_th1 = mk_standard_ineq rewrite_thms ineq_tm in
+  let ineq_tm1 = (lhand o lhand o concl) imp_th1 in
     if frees ineq_tm1 = [] then
       let i_fun = build_interval_fun ineq_tm1 in
       let th0 = eval_interval_fun pp i_fun [] [] in
       let th1 = float_interval_lt0 th0 in
       let total = Unix.gettimeofday() -. total_start in
-	REWRITE_RULE[GSYM eq_th1] th1, 
+	MP imp_th1 th1,
   {total_time = total; formal_verification_time = total; certificate = Certificate.dummy_stats}
     else
       let fun_tm, v1 = expr_to_vector_fun ineq_tm1 in
@@ -566,7 +588,7 @@ let verify_ineq0 params0 norm_flag pp ineq_tm var_names (lo_tm, hi_tm) rewrite_t
 	  let finish = Unix.gettimeofday() in
 	  let _ = !info_print_level < 1 or (report0 " done\n"; true) in
 	    start, finish, result in
-	normalize_result norm_flag v1 eq_th1 domain_sub_th result,
+	normalize_result norm_flag v1 imp_th1 domain_sub_th result,
   {total_time = finish -. total_start; formal_verification_time = finish -. start; certificate = stats};;
 	
 
@@ -584,7 +606,7 @@ let verify_ineq = verify_ineq_and_rewrite [];;
 
 *)
 
-let normalize_disj_result norm_flag fun_tms v1 eq_th1 domain_sub_th pass_thm =
+let normalize_disj_result norm_flag fun_tms v1 imp_th1 domain_sub_th pass_thm =
   let fs, dom = dest_m_cell_pass (concl pass_thm) in
   let fs2 = mk_list (fun_tms, type_of (hd fun_tms)) in
   let append_th0 = MATCH_MP (ISPECL[fs; fs2; dom] M_CELL_LIST_PASS_APPEND) pass_thm in
@@ -595,10 +617,10 @@ let normalize_disj_result norm_flag fun_tms v1 eq_th1 domain_sub_th pass_thm =
   let comp_thms = end_itlist CONJ (Array.to_list comp_thms_array.(n)) in
   let th2 = REWRITE_RULE[comp_thms] th1 in
   let r_tm0 = (rand o concl) th2 in
-  let r_tm1 = (rand o concl) eq_th1 in
+  let r_tm1 = (lhand o concl) imp_th1 in
   let imp_th = REAL_ARITH (mk_imp (r_tm0, r_tm1)) in
   let th3 = MP imp_th (UNDISCH_ALL th2) in
-  let th4 = REWRITE_RULE[GSYM eq_th1] th3 in
+  let th4 = MP imp_th1 th3 in
   let dom_th = (UNDISCH_ALL o SPEC v1 o REWRITE_RULE[SUBSET]) domain_sub_th in
   let th5 = (DISCH_ALL o MY_PROVE_HYP dom_th) th4 in
   let th6 = REWRITE_RULE[IN_INTERVAL; dimindex_array.(n); gen_in_interval n; comp_thms] th5 in
@@ -607,8 +629,8 @@ let normalize_disj_result norm_flag fun_tms v1 eq_th1 domain_sub_th pass_thm =
 
 let verify_disj_ineq0 params0 norm_flag pp ineq_tm var_names (lo_tm, hi_tm) rewrite_thms =
   let total_start = Unix.gettimeofday() in
-  let eq_th1 = mk_standard_ineq rewrite_thms ineq_tm in
-  let ineq_tms = striplist dest_disj ((rand o concl) eq_th1) in
+  let imp_th1 = mk_standard_ineq rewrite_thms ineq_tm in
+  let ineq_tms = striplist dest_disj ((lhand o concl) imp_th1) in
     if length ineq_tms = 1 then
       verify_ineq0 params0 norm_flag pp ineq_tm var_names (lo_tm, hi_tm) rewrite_thms
     else
@@ -676,7 +698,7 @@ let verify_disj_ineq0 params0 norm_flag pp ineq_tm var_names (lo_tm, hi_tm) rewr
 	  let finish = Unix.gettimeofday() in
 	  let _ = !info_print_level < 1 or (report0 " done\n"; true) in
 	    start, finish, result in
-	normalize_disj_result norm_flag fun_tms v1 eq_th1 domain_sub_th result,
+	normalize_disj_result norm_flag fun_tms v1 imp_th1 domain_sub_th result,
   {total_time = finish -. total_start; formal_verification_time = finish -. start; certificate = stats};;
 
 

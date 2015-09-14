@@ -558,7 +558,7 @@ let verify_ineq0 params0 norm_flag pp ineq_tm var_names (lo_tm, hi_tm) rewrite_t
 	Informal_search.max_width = 1e-10;
 	Informal_search.max_depth = 200;
 	Informal_search.pp = pp;
-	Informal_search.mono_depth = 200;
+	Informal_search.mono_depth = if !params.allow_derivatives then 200 else 0;
       } in
       let fs_inf = map (fun f -> f.Informal_verifier.f, f.Informal_verifier.taylor) [ti] in
       let dom_inf = Informal_taylor.mk_m_center_domain pp xx2 zz2 in

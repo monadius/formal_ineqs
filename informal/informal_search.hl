@@ -108,11 +108,16 @@ let rec check_cell opt dom =
       | f :: rest ->
 	  begin
 	    try
-	      let raw_fail, raw_pass = 
+	      let raw_fail, raw_pass =
 		if opt.raw_intervals0 then
-		  let interval = f.eval0 pp dom.lo dom.hi in
-		  let lo, hi = dest_interval interval in
-		    ge0_float lo, lt0_float hi
+		  begin
+		    try
+		      let interval = f.eval0 pp dom.lo dom.hi in
+		      let lo, hi = dest_interval interval in
+			ge0_float lo, lt0_float hi
+		    with Failure _ | Division_by_zero ->
+		      false, false
+		  end
 		else
 		  false, false in
 		if raw_pass then

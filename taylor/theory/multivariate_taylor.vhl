@@ -22,6 +22,11 @@ module Multivariate_taylor.
 "prioritize_overload `:real^N`".
 "prioritize_real()".
 
+"let IMAGE_DELETE_INJ_COMPAT = prove
+ (`!f s a. (!x. f(x) = f(a) ==> x = a)
+            ==> (IMAGE f (s DELETE a) = (IMAGE f s) DELETE (f a))`,
+	      SET_TAC[])".
+
 "let partial = new_definition `partial i f x = derivative (f o (\t. (x:real^N) + t % basis i)) (&0)`".
 
 "let all_n = define `(all_n n [] s <=> T) /\ (all_n n (CONS h t) s <=> s n h /\ all_n (SUC n) t s)`".
@@ -1964,7 +1969,7 @@ Qed.
 Lemma real_open_delete s x : `real_open s ==> real_open (s DELETE x)`.
 Proof.
 rewrite !REAL_OPEN => /OPEN_DELETE /(_ `lift x`).
-by rewrite IMAGE_DELETE_INJ ?LIFT_EQ.
+by rewrite IMAGE_DELETE_INJ_COMPAT ?LIFT_EQ.
 Qed.
 
 

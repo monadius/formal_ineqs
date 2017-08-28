@@ -15,8 +15,6 @@ needs "tests/log.hl";;
 
 (* FLOOR_DIV_DIV *)
 needs "Library/floor.ml";;
-(* sqrt and its properties *)
-needs "Multivariate/vectors.ml";;
 
 module type Arith_float_sig =
   sig
@@ -4120,14 +4118,10 @@ let FLOAT_INTERVAL_SQRT = prove(`interval_arith x (float_num F n1 e1, hi) /\
      [
        MATCH_MP_TAC REAL_LE_TRANS THEN
 	 EXISTS_TAC `sqrt lo` THEN
-	 ASM_REWRITE_TAC[] THEN
-	 MATCH_MP_TAC SQRT_MONO_LE THEN
-	 ASM_REWRITE_TAC[];
+	 ASM_REWRITE_TAC[SQRT_MONO_LE_EQ];
        MATCH_MP_TAC REAL_LE_TRANS THEN
 	 EXISTS_TAC `sqrt hi` THEN
-	 ASM_REWRITE_TAC[] THEN
-	 MATCH_MP_TAC SQRT_MONO_LE THEN
-	 ASM_REWRITE_TAC[]
+	 ASM_REWRITE_TAC[SQRT_MONO_LE_EQ]
      ]);;
 
 

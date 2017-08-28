@@ -2267,10 +2267,10 @@ let diff2_inv = Sections.section_proof ["x"]
 
 (* Lemma SQRT_POW *)
 let SQRT_POW = Sections.section_proof ["x";"n"]
-`&0 <= x ==> sqrt x pow n = sqrt (x pow n)`
+`sqrt x pow n = sqrt (x pow n)`
 [
-   ((BETA_TAC THEN (move ["ineq"])) THEN ((THENL) (((use_arg_then2 ("n", [])) (disch_tac [])) THEN (clear_assumption "n") THEN elim) [ALL_TAC; ((move ["n"]) THEN (move ["IHn"]))]) THEN ((repeat_tactic 1 9 (((fun arg_tac -> arg_tac (Arg_theorem (GEN_ALL real_pow)))(thm_tac (new_rewrite [] []))))) THEN (repeat_tactic 0 10 (((use_arg_then2 ("SQRT_1", [SQRT_1]))(thm_tac (new_rewrite [] []))))) THEN ((TRY done_tac))));
-   (((((use_arg_then2 ("IHn", []))(thm_tac (new_rewrite [] [])))) THEN (((use_arg_then2 ("SQRT_MUL", [SQRT_MUL]))(thm_tac (new_rewrite [] [])))) THEN ((TRY done_tac)) THEN (((use_arg_then2 ("REAL_POW_LE", [REAL_POW_LE]))(thm_tac (new_rewrite [] []))))) THEN (done_tac));
+   (((THENL) (((use_arg_then2 ("n", [])) (disch_tac [])) THEN (clear_assumption "n") THEN elim) [ALL_TAC; ((move ["n"]) THEN (move ["IHn"]))]) THEN ((repeat_tactic 1 9 (((fun arg_tac -> arg_tac (Arg_theorem (GEN_ALL real_pow)))(thm_tac (new_rewrite [] []))))) THEN (repeat_tactic 0 10 (((use_arg_then2 ("SQRT_1", [SQRT_1]))(thm_tac (new_rewrite [] []))))) THEN ((TRY done_tac))));
+   (((((use_arg_then2 ("IHn", []))(thm_tac (new_rewrite [] [])))) THEN (((use_arg_then2 ("SQRT_MUL", [SQRT_MUL]))(thm_tac (new_rewrite [] []))))) THEN (done_tac));
 ];;
 
 (* Lemma second_derivative_sqrt *)

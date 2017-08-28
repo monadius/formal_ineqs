@@ -14,7 +14,6 @@
 
 module Taylor_interval.
 
-"open Ssreflect".
 "open Ssrfun".
 "open Ssrbool".
 "open Ssrnat".
@@ -1701,10 +1700,10 @@ Qed.
 
 (* sqrt *)
 
-Lemma SQRT_POW x n : `&0 <= x ==> sqrt x pow n = sqrt (x pow n)`.
+Lemma SQRT_POW x n : `sqrt x pow n = sqrt (x pow n)`.
 Proof.
-move => ineq; elim: n => [|n IHn]; rewrite !"GEN_ALL real_pow" ?SQRT_1 //.
-by rewrite IHn SQRT_MUL // REAL_POW_LE.
+elim: n => [|n IHn]; rewrite !"GEN_ALL real_pow" ?SQRT_1 //.
+by rewrite IHn SQRT_MUL.
 Qed.
 
 

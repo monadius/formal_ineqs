@@ -13,13 +13,10 @@ open Taylor_interval;;
 open Interval_arith;;
 prioritize_overload `:real^N`;;
 prioritize_real();;
-
 let IMAGE_DELETE_INJ_COMPAT = prove
  (`!f s a. (!x. f(x) = f(a) ==> x = a)
             ==> (IMAGE f (s DELETE a) = (IMAGE f s) DELETE (f a))`,
 	      SET_TAC[]);;
-
-
 let partial = new_definition `partial i f x = derivative (f o (\t. (x:real^N) + t % basis i)) (&0)`;;
 let all_n = define `(all_n n [] s <=> T) /\ (all_n n (CONS h t) s <=> s n h /\ all_n (SUC n) t s)`;;
 let m_lin_approx = new_definition `m_lin_approx (f:real^N->real) x f_bounds df_bounds_list <=> 
@@ -2610,8 +2607,7 @@ let diff2c_matan_compose = Sections.section_proof ["f"]
    (((((use_arg_then2 ("REAL_POW_2", [REAL_POW_2]))(thm_tac (new_rewrite [] [])))) THEN (repeat_tactic 1 9 (((use_arg_then2 ("REAL_ENTIRE", [REAL_ENTIRE]))(thm_tac (new_rewrite [] [])))))) THEN (((use_arg_then2 ("fn2", [])) (disch_tac [])) THEN (clear_assumption "fn2") THEN BETA_TAC) THEN (arith_tac) THEN (done_tac));
    ((((use_arg_then2 ("REAL_CONTINUOUS_SUB", [REAL_CONTINUOUS_SUB]))(thm_tac (new_rewrite [] [])))) THEN ((TRY done_tac)) THEN (repeat_tactic 1 9 (((use_arg_then2 ("REAL_CONTINUOUS_LMUL", [REAL_CONTINUOUS_LMUL]))(thm_tac (new_rewrite [] []))))) THEN ((TRY done_tac)));
    ((((fun arg_tac -> arg_tac (Arg_theorem (GEN_ALL REAL_CONTINUOUS_DIV_ATREAL)))(thm_tac (new_rewrite [] [])))) THEN (((use_arg_then2 ("REAL_CONTINUOUS_MUL", [REAL_CONTINUOUS_MUL]))(thm_tac (new_rewrite [] [])))));
-   ((((use_arg_then2 ("REAL_CONTINUOUS_POW", [REAL_CONTINUOUS_POW]))(thm_tac (new_rewrite [] [])))) THEN (repeat_tactic 0 10 (((use_arg_then2 ("REAL_CONTINUOUS_AT_ID", [REAL_CONTINUOUS_AT_ID]))(thm_tac (new_rewrite [] []))))) THEN ((TRY done_tac)) THEN (((use_arg_then2 ("REAL_CONTINUOUS_AT_SQRT", [REAL_CONTINUOUS_AT_SQRT]))(thm_tac (new_rewrite [] [])))) THEN ((TRY done_tac)));
-   ((((use_arg_then2 ("fn2", [])) (disch_tac [])) THEN (clear_assumption "fn2") THEN BETA_TAC) THEN (arith_tac) THEN (done_tac));
+   (((((use_arg_then2 ("REAL_CONTINUOUS_POW", [REAL_CONTINUOUS_POW]))(thm_tac (new_rewrite [] [])))) THEN (repeat_tactic 0 10 (((use_arg_then2 ("REAL_CONTINUOUS_AT_ID", [REAL_CONTINUOUS_AT_ID]))(thm_tac (new_rewrite [] []))))) THEN ((TRY done_tac)) THEN (((use_arg_then2 ("REAL_CONTINUOUS_AT_SQRT", [REAL_CONTINUOUS_AT_SQRT]))(thm_tac (new_rewrite [] []))))) THEN (done_tac));
    ((THENL_LAST) (((((use_arg_then2 ("andTb", [andTb]))(thm_tac (new_rewrite [] [])))) THEN (((use_arg_then2 ("REAL_POW_2", [REAL_POW_2]))(thm_tac (new_rewrite [] [])))) THEN (repeat_tactic 1 9 (((use_arg_then2 ("REAL_ENTIRE", [REAL_ENTIRE]))(thm_tac (new_rewrite [] []))))) THEN (((use_arg_then2 ("SQRT_EQ_0", [SQRT_EQ_0]))(thm_tac (new_rewrite [] []))))) THEN (split_tac)) ((((use_arg_then2 ("fn2", [])) (disch_tac [])) THEN (clear_assumption "fn2") THEN BETA_TAC) THEN (arith_tac) THEN (done_tac)));
    ((((fun arg_tac -> (use_arg_then2 ("o_THM", [o_THM])) (fun fst_arg -> (fun arg_tac -> arg_tac (Arg_term (`atn`))) (fun snd_arg -> combine_args_then arg_tac fst_arg snd_arg)))(gsym_then (thm_tac (new_rewrite [] []))))) THEN (((use_arg_then2 ("ETA_AX", [ETA_AX]))(fun arg -> ONCE_REWRITE_TAC[get_arg_thm arg]))) THEN (((use_arg_then2 ("REAL_CONTINUOUS_ATREAL_COMPOSE", [REAL_CONTINUOUS_ATREAL_COMPOSE]))(thm_tac (new_rewrite [] [])))));
    (((((use_arg_then2 ("REAL_CONTINUOUS_AT_ATN", [REAL_CONTINUOUS_AT_ATN]))(thm_tac (new_rewrite [] [])))) THEN (((use_arg_then2 ("REAL_CONTINUOUS_AT_SQRT", [REAL_CONTINUOUS_AT_SQRT]))(thm_tac (new_rewrite [] [])))) THEN ((TRY done_tac))) THEN (((use_arg_then2 ("fn2", [])) (disch_tac [])) THEN (clear_assumption "fn2") THEN BETA_TAC) THEN (arith_tac) THEN (done_tac));

@@ -147,13 +147,13 @@ let float_pow_neg_odd_hi_th = (th_rule o prove)
   (`(EVEN i <=> F) /\ float_num F n1 e1 <= float_num F n e pow i
      ==> float_num T n e pow i <= float_num T n1 e1`,
    MP_TAC ((GSYM o SPEC `F`) FLOAT_NEG) THEN SIMP_TAC[] THEN REPEAT STRIP_TAC THEN
-     ASM_REWRITE_TAC[REAL_POW_NEG; REAL_LE_NEG]);;
+     ASM_REWRITE_TAC[REAL_POW_NEG; REAL_LE_NEG2]);;
 
 let float_pow_neg_odd_lo_th = (th_rule o prove)
   (`(EVEN i <=> F) /\ float_num F n e pow i <= float_num F n1 e1
      ==> float_num T n1 e1 <= float_num T n e pow i`,
    MP_TAC ((GSYM o SPEC `F`) FLOAT_NEG) THEN SIMP_TAC[] THEN REPEAT STRIP_TAC THEN
-     ASM_REWRITE_TAC[REAL_POW_NEG; REAL_LE_NEG]);;
+     ASM_REWRITE_TAC[REAL_POW_NEG; REAL_LE_NEG2]);;
 
 
 let float_pow_pos_suc_hi pp x_tm t_th =

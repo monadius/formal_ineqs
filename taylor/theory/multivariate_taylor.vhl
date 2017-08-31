@@ -1341,7 +1341,7 @@ set s := `sum _1 _2` => ineq.
 apply: REAL_LE_TRANS; exists `(f y + s) - dd_bound / &2`; rewrite ineq andbT.
 apply: ("REWRITE_RULE[GSYM IMP_IMP] REAL_LE_TRANS" total_bound).
 rewrite !real_sub REAL_NEG_ADD REAL_ADD_ASSOC REAL_LE_RADD REAL_LE_ADD2 f_bound andTb.
-apply: REAL_LE_TRANS; exists `--abs s`; rewrite REAL_LE_NEG; split; last by arith.
+apply: REAL_LE_TRANS; exists `--abs s`; rewrite REAL_LE_NEG2; split; last by arith.
 rewrite -s_def SUM_ABS_LE FINITE_NUMSEG andTb => i i_ineq /=.
 by rewrite REAL_ABS_MUL REAL_LE_MUL2 !REAL_ABS_POS REAL_LE_REFL VECTOR_SUB_COMPONENT (domain_width domainH).
 Qed.
@@ -1359,7 +1359,7 @@ Lemma m_taylor_bounds domain y w f dd_bound lo hi err_bound lo_bound hi_bound :
 rewrite m_bounded_on_int !interval_arith => domainH df errorH [f_lo f_hi] err lo_ineq hi_ineq p p_in.
 move: (m_taylor_lower_bound domainH df errorH f_lo lo_bound) => ->.
   rewrite p_in andbT; apply: REAL_LE_TRANS; exists `lo - err_bound`.
-  by rewrite lo_ineq andTb !real_sub REAL_LE_ADD2 REAL_LE_REFL REAL_LE_NEG.
+  by rewrite lo_ineq andTb !real_sub REAL_LE_ADD2 REAL_LE_REFL REAL_LE_NEG2.
 move: (m_taylor_upper_bound domainH df errorH f_hi hi_bound) => -> //.
 rewrite p_in andbT; apply: REAL_LE_TRANS; exists `hi + err_bound`.
 by rewrite hi_ineq andbT REAL_LE_LADD.
@@ -1999,7 +1999,7 @@ rewrite REAL_OPEN_HALFSPACE_GT !IN_ELIM_THM /= !real_gt; split; last first.
 split; last by exists `f x`.
 rewrite REAL_CONTINUOUS_NEG REAL_CONTINUOUS_INV_ATREAL REAL_CONTINUOUS_LMUL; last first.
   rewrite REAL_ENTIRE negb_or andTb; split; first by arith.
-  by rewrite SQRT_EQ_0 ?REAL_POW_NZ ?REAL_POS_NZ.
+  by rewrite SQRT_EQ_0 ?REAL_POW_NZ ?REAL_LT_IMP_NZ.
 have ->: `(\x. sqrt (x pow 3)) = (sqrt o (\x. x pow 3))`.
   by rewrite FUN_EQ_THM o_THM.
 rewrite REAL_CONTINUOUS_ATREAL_COMPOSE /= REAL_CONTINUOUS_POW ?REAL_CONTINUOUS_AT_ID andTb.

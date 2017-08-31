@@ -696,7 +696,7 @@ let fp_mul_opp_hi,
 	==> fp T m e <= fp s1 m1 e1 * fp s2 m2 e2` in
   let proof = 
     REPEAT STRIP_TAC THEN ASM_SIMP_TAC[fp_mul_opp_eq; fp; GSYM REAL_NEG_MINUS1] THEN
-      POP_ASSUM (fun th -> REWRITE_TAC[SYM th; REAL_LE_NEG]) THEN
+      POP_ASSUM (fun th -> REWRITE_TAC[SYM th; REAL_LE_NEG2]) THEN
       SIMP_TAC[base_const_not_zero; IPOW_ADD; pos_int] THEN
       REWRITE_TAC[REAL_MUL_ASSOC; IPOW_NUM; REAL_OF_NUM_POW; REAL_OF_NUM_MUL; GSYM nexp] THEN
       MATCH_MP_TAC REAL_LE_RMUL THEN

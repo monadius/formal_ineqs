@@ -1038,7 +1038,7 @@ case => [-> | xb]; last by apply: ineq; rewrite IN_REAL_INTERVAL.
 set g := `\x. f (--x)`.
 have fg: `!x. f x = g (--x)`; first by rewrite -g_def /= REAL_NEG_NEG.
 rewrite fg; apply: continuous_leq; split.
-  exists `--a`; rewrite REAL_LT_NEG ab andTb IN_REAL_INTERVAL => y.
+  exists `--a`; rewrite REAL_LT_NEG2 ab andTb IN_REAL_INTERVAL => y.
   by move: (ineq `--y`); rewrite IN_REAL_INTERVAL fg REAL_NEG_NEG; arith.
 by rewrite -g_def -continuous_reflection.
 Qed.
@@ -1569,7 +1569,7 @@ rewrite REAL_POW_INV -real_div -REAL_NEG_LMUL HAS_REAL_DERIVATIVE_INV_ATREAL; sp
   rewrite -(REAL_ADD_LID `&2 * x`) HAS_REAL_DERIVATIVE_ADD HAS_REAL_DERIVATIVE_CONST andTb.
   rewrite REAL_POW_2 "REAL_ARITH `&2 * x = x * &1 + &1 * x`".
   by rewrite HAS_REAL_DERIVATIVE_MUL_ATREAL HAS_REAL_DERIVATIVE_ID.
-by rewrite REAL_POS_NZ // REAL_ADD_SYM REAL_LT_ADD1 REAL_LE_POW_2.
+by rewrite REAL_LT_IMP_NZ // REAL_ADD_SYM REAL_LT_ADD1 REAL_LE_POW_2.
 Qed.
 
 Lemma second_derivative_atn : 
@@ -2119,7 +2119,7 @@ have ->: `sqrt (f x pow 3) = sqrt (f x) * f x`.
   by rewrite -SQRT_POW ?REAL_LT_IMP_LE // "ARITH_RULE `3 = SUC 2`" real_powS SQRT_POW_2 ?REAL_LT_IMP_LE.
 rewrite !REAL_INV_MUL.
 rewrite "REAL_ARITH `!a b c d. (&2 * a * b) * inv (&4) * c * d = (inv (&2) * c) * a * (b * d)`".
-by rewrite REAL_MUL_RINV ?REAL_POS_NZ // REAL_MUL_RID.
+by rewrite REAL_MUL_RINV ?REAL_LT_IMP_NZ // REAL_MUL_RID.
 Qed.
 
 (* acs *)

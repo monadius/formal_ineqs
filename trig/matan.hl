@@ -419,7 +419,7 @@ let matan_d2_bound_ge1_high = prove(`!x. &1 <= x ==>
      ] THEN
      MATCH_MP_TAC REAL_LE_TRANS THEN 
      EXISTS_TAC `atn (&1) / (&1 pow 5)` THEN CONJ_TAC THENL [
-       ONCE_REWRITE_TAC[GSYM REAL_LE_NEG] THEN
+       ONCE_REWRITE_TAC[GSYM REAL_LE_NEG2] THEN
 	 ABBREV_TAC `f = \y. --(atn y / y pow 5)` THEN
 	 SUBGOAL_THEN `!x. --(atn x / x pow 5) = f x` (fun th -> REWRITE_TAC[th]) THENL [
 	   EXPAND_TAC "f" THEN REWRITE_TAC[];

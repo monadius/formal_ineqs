@@ -79,7 +79,7 @@ let acs_float_hi pp x =
       let hi = sub_float_hi pp b c in
 	hi
     else
-      failwith "acs_float_hi: x < -1 or x > 1";;
+      failwith "acs_float_hi: x < -1 || x > 1";;
 
 let acs_float_lo pp x =
   let flag1 = le_float x float1 in
@@ -90,7 +90,7 @@ let acs_float_lo pp x =
       let lo = sub_float_lo pp a c in
 	lo
     else
-      failwith "acs_float_lo: x < -1 or x > 1";;
+      failwith "acs_float_lo: x < -1 || x > 1";;
 
 let asn_interval pp i =
   let a, b = dest_interval i in
@@ -101,7 +101,7 @@ let asn_interval pp i =
 	  hi = asn_float_hi pp b in
 	mk_interval (lo, hi)
     else
-      failwith "asn_interval: x < -1 or x > 1";;
+      failwith "asn_interval: x < -1 || x > 1";;
 
 let acs_interval pp i =
   let a, b = dest_interval i in
@@ -112,7 +112,7 @@ let acs_interval pp i =
 	  hi = acs_float_hi pp a in
 	mk_interval (lo, hi)
     else
-      failwith "acs_interval: x < -1 or x > 1";;
+      failwith "acs_interval: x < -1 || x > 1";;
 
 end;;
 

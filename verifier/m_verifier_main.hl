@@ -118,10 +118,10 @@ let test_expression bin_ops unary_ops =
       with Failure _ -> false 
     in
       fun tm ->
-	frees tm = [] or
-	can dest_var tm or
-	can test_vector tm or
-	test_unary tm or
+	frees tm = [] ||
+	can dest_var tm ||
+	can test_vector tm ||
+	test_unary tm ||
 	test_binary tm in
     test;;
 
@@ -552,7 +552,7 @@ let verify_ineq0 params0 norm_flag pp ineq_tm var_names (lo_tm, hi_tm) rewrite_t
       let params = ref params0 in
       let eval_fs, ti = mk_verification_functions params pp fun_tm in
 	
-      let _ = !info_print_level < 1 or (report0 "Constructing a solution certificate... "; true) in
+      let _ = !info_print_level < 1 || (report0 "Constructing a solution certificate... "; true) in
       let opt0 = {
 	Informal_search.raw_intervals0 = !params.raw_intervals0;
 	Informal_search.max_width = 1e-10;
@@ -565,28 +565,28 @@ let verify_ineq0 params0 norm_flag pp ineq_tm var_names (lo_tm, hi_tm) rewrite_t
       let certificate = Informal_search.construct_certificate opt0 dom_inf fs_inf in
 
       let stats = Certificate.result_stats certificate in
-      let _ = !info_print_level < 1 or (report0 " done\n"; true) in
-      let _ = !info_print_level < 1 or (Certificate.report_stats stats; true) in
+      let _ = !info_print_level < 1 || (report0 " done\n"; true) in
+      let _ = !info_print_level < 1 || (Certificate.report_stats stats; true) in
 
       let c1 = Certificate.transform_result xx_float zz_float certificate in
       let start, finish, result = 
 	if !params.adaptive_precision then
-	  let _ = !info_print_level < 1 or (report0 "Informal verification... "; true) in
+	  let _ = !info_print_level < 1 || (report0 "Informal verification... "; true) in
 	  let c1p = Informal_verifier.m_verify_list pp 1 pp [ti] c1 xx2 zz2 in
-	  let _ = !info_print_level < 1 or (report0 " done\n"; true) in
+	  let _ = !info_print_level < 1 || (report0 " done\n"; true) in
 
-	  let _ = !info_print_level < 1 or (report0 "Formal verification... "; true) in
+	  let _ = !info_print_level < 1 || (report0 "Formal verification... "; true) in
 	  let start = Unix.gettimeofday() in
 	  let result = m_p_verify_list n pp eval_fs c1p xx1 zz1 in
 	  let finish = Unix.gettimeofday() in
-	  let _ = !info_print_level < 1 or (report0 " done\n"; true) in
+	  let _ = !info_print_level < 1 || (report0 " done\n"; true) in
 	    start, finish, result
 	else
-	  let _ = !info_print_level < 1 or (report0 "Formal verification... "; true) in
+	  let _ = !info_print_level < 1 || (report0 "Formal verification... "; true) in
 	  let start = Unix.gettimeofday() in
 	  let result = m_verify_list n pp eval_fs c1 xx1 zz1 in
 	  let finish = Unix.gettimeofday() in
-	  let _ = !info_print_level < 1 or (report0 " done\n"; true) in
+	  let _ = !info_print_level < 1 || (report0 " done\n"; true) in
 	    start, finish, result in
 	normalize_result norm_flag v1 imp_th1 domain_sub_th result,
   {total_time = finish -. total_start; formal_verification_time = finish -. start; certificate = stats};;
@@ -652,9 +652,9 @@ let verify_disj_ineq0 params0 norm_flag pp ineq_tm var_names (lo_tm, hi_tm) rewr
 	  zz_float = map float_of_float_tm (dest_list zz1) in
 
 	(* Issue warnings for unimplemented features *)
-      let _ = params0.mono_pass_flag = false or (report "WARNING: mono_pass_flag should be false"; true) in
-      let _ = params0.convex_flag = false or (report "WARNING: covex_flag should be false"; true) in
-      let _ = params0.allow_derivatives = false or (report "WARNING: allow_derivatives should be false"; true) in
+      let _ = params0.mono_pass_flag = false || (report "WARNING: mono_pass_flag should be false"; true) in
+      let _ = params0.convex_flag = false || (report "WARNING: covex_flag should be false"; true) in
+      let _ = params0.allow_derivatives = false || (report "WARNING: allow_derivatives should be false"; true) in
 
       let params = ref {params0 with 
 			  mono_pass_flag = false;
@@ -662,7 +662,7 @@ let verify_disj_ineq0 params0 norm_flag pp ineq_tm var_names (lo_tm, hi_tm) rewr
 			  allow_derivatives = false} in
 
       let eval_fs_list, ti_list = unzip (map (mk_verification_functions params pp) fun_tms) in
-      let _ = !info_print_level < 1 or (report0 "Constructing a solution certificate... "; true) in
+      let _ = !info_print_level < 1 || (report0 "Constructing a solution certificate... "; true) in
       let opt0 = {
 	Informal_search.raw_intervals0 = !params.raw_intervals0;
 	Informal_search.max_width = 1e-10;
@@ -675,28 +675,28 @@ let verify_disj_ineq0 params0 norm_flag pp ineq_tm var_names (lo_tm, hi_tm) rewr
       let certificate = Informal_search.construct_certificate opt0 dom_inf fs_inf in
 
       let stats = Certificate.result_stats certificate in
-      let _ = !info_print_level < 1 or (report0 " done\n"; true) in
-      let _ = !info_print_level < 1 or (Certificate.report_stats stats; true) in
+      let _ = !info_print_level < 1 || (report0 " done\n"; true) in
+      let _ = !info_print_level < 1 || (Certificate.report_stats stats; true) in
 
       let c1 = certificate in
       let start, finish, result =
 	if !params.adaptive_precision then
-	  let _ = !info_print_level < 1 or (report0 "Informal verification... "; true) in
+	  let _ = !info_print_level < 1 || (report0 "Informal verification... "; true) in
 	  let c1p, _ = Informal_verifier.m_verify_raw0 pp 1 pp ti_list c1 xx2 zz2 in
-	  let _ = !info_print_level < 1 or (report0 " done\n"; true) in
+	  let _ = !info_print_level < 1 || (report0 " done\n"; true) in
 
-	  let _ = !info_print_level < 1 or (report0 "Formal verification... "; true) in
+	  let _ = !info_print_level < 1 || (report0 "Formal verification... "; true) in
 	  let start = Unix.gettimeofday() in
 	  let result = m_p_verify_disj_raw0 n pp eval_fs_list c1p xx1 zz1 in
 	  let finish = Unix.gettimeofday() in
-	  let _ = !info_print_level < 1 or (report0 " done\n"; true) in
+	  let _ = !info_print_level < 1 || (report0 " done\n"; true) in
 	    start, finish, result
 	else
-	  let _ = !info_print_level < 1 or (report0 "Formal verification... "; true) in
+	  let _ = !info_print_level < 1 || (report0 "Formal verification... "; true) in
 	  let start = Unix.gettimeofday() in
 	  let result = m_verify_disj_raw0 n pp eval_fs_list c1 xx1 zz1 in
 	  let finish = Unix.gettimeofday() in
-	  let _ = !info_print_level < 1 or (report0 " done\n"; true) in
+	  let _ = !info_print_level < 1 || (report0 " done\n"; true) in
 	    start, finish, result in
 	normalize_disj_result norm_flag fun_tms v1 imp_th1 domain_sub_th result,
   {total_time = finish -. total_start; formal_verification_time = finish -. start; certificate = stats};;
@@ -814,7 +814,7 @@ let xx_float = map float_of_float_tm (dest_list xx1) and
 let params = ref params0;;
 let eval_fs_list, tf_list, ti_list = unzip3 (map (mk_verification_functions params pp) fun_tms);;
 
-let _ = !info_print_level < 1 or (report0 "Constructing a solution certificate... "; true);;
+let _ = !info_print_level < 1 || (report0 "Constructing a solution certificate... "; true);;
 let opt0 = {
   Verifier.min_flag = false;
   Verifier.min_max = 0.0;
@@ -826,28 +826,28 @@ let opt0 = {
 };;
 let certificate = Verifier.run_test tf_list xx_float zz_float opt0;;
 let stats = Verifier.result_stats certificate;;
-let _ = !info_print_level < 1 or (report0 " done\n"; true);;
-let _ = !info_print_level < 1 or (Verifier.report_stats stats; true);;
+let _ = !info_print_level < 1 || (report0 " done\n"; true);;
+let _ = !info_print_level < 1 || (Verifier.report_stats stats; true);;
 
 let c1 = certificate;;
 let start, finish, result = 0,0,0;;
 if !params.adaptive_precision then 1 else 0;;
-let _ = !info_print_level < 1 or (report0 "Informal verification... "; true);;
+let _ = !info_print_level < 1 || (report0 "Informal verification... "; true);;
 let c1p, _ = Informal_verifier.m_verify_raw0 pp 1 pp ti_list c1 xx2 zz2;;
-let _ = !info_print_level < 1 or (report0 " done\n"; true);;
+let _ = !info_print_level < 1 || (report0 " done\n"; true);;
 
-let _ = !info_print_level < 1 or (report0 "Formal verification... "; true);;
+let _ = !info_print_level < 1 || (report0 "Formal verification... "; true);;
 let start = Unix.gettimeofday();;
 let result = m_p_verify_disj_raw0 n pp eval_fs_list c1p xx1 zz1;;
 let finish = Unix.gettimeofday();;
-let _ = !info_print_level < 1 or (report0 " done\n"; true);;
+let _ = !info_print_level < 1 || (report0 " done\n"; true);;
 start, finish, result;;
  (*else*)
-let _ = !info_print_level < 1 or (report0 "Formal verification... "; true);;
+let _ = !info_print_level < 1 || (report0 "Formal verification... "; true);;
 let start = Unix.gettimeofday();;
 let result = m_verify_disj_raw0 n pp eval_fs_list c1 xx1 zz1;;
 let finish = Unix.gettimeofday();;
-let _ = !info_print_level < 1 or (report0 " done\n"; true) in
+let _ = !info_print_level < 1 || (report0 " done\n"; true) in
   start, finish, result;;
 
 normalize_disj_result norm_flag fun_tms v1 eq_th1 domain_sub_th result;;

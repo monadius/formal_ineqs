@@ -286,7 +286,7 @@ let interval_to_float_interval pp int_th =
 (* Adds a new constant approximation to the table of constants *)
 let add_constant_interval int_th =
   let c_tm = (rand o rator o concl) int_th in
-  let _ = is_const c_tm or failwith "add_constant_interval: not a constant" in
+  let _ = is_const c_tm || failwith "add_constant_interval: not a constant" in
   let interval = interval_to_float_interval 20 int_th in
   let approx_array = Array.init 20 (fun i -> round_interval (if i = 0 then 1 else i) interval) in
     Hashtbl.add interval_constants (fst (dest_const c_tm)) (fun pp -> approx_array.(pp));;

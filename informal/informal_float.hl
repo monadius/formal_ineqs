@@ -120,7 +120,7 @@ let ifloat_of_float =
     let b = float_of_int arith_base in
     let log_b = log b in
     let rec fix t k =
-      if t = 0.0 or t = infinity or t = nan then
+      if t = 0.0 || t = infinity || t = nan then
 	t, k
       else if t < 1.0 then
 	fix (t *. b) (k - 1)
@@ -290,7 +290,7 @@ let mul_float_eq (s1,n1,e1) (s2,n2,e2) =
 
 
 let mul_float_lo pp (s1,n1,e1) (s2,n2,e2) =
-  if eq0_nat n1 or eq0_nat n2 then
+  if eq0_nat n1 || eq0_nat n2 then
     float0
   else
     let s = badd s1 s2 in
@@ -304,7 +304,7 @@ let mul_float_lo pp (s1,n1,e1) (s2,n2,e2) =
 
 
 let mul_float_hi pp (s1,n1,e1) (s2,n2,e2) =
-  if eq0_nat n1 or eq0_nat n2 then
+  if eq0_nat n1 || eq0_nat n2 then
     float0
   else
     let s = badd s1 s2 in

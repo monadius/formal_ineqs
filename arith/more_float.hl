@@ -43,7 +43,7 @@ let float_tm_of_float =
     let b = float_of_int Arith_num.arith_base in
     let log_b = log b in
     let rec fix t k =
-      if t = 0.0 or t = infinity or t = nan then
+      if t = 0.0 || t = infinity || t = nan then
 	t, k
       else if t < 1.0 then
 	fix (t *. b) (k - 1)
@@ -157,7 +157,7 @@ let float_interval_lt0 th =
   let x_tm, bounds = dest_interval_arith (concl th) in
   let lo_tm, hi_tm = dest_pair bounds in
   let lt0_th = float_lt0 hi_tm in
-  let _ = ((rand o concl) lt0_th = t_const) or failwith "float_interval_lt0: &0 <= hi" in
+  let _ = ((rand o concl) lt0_th = t_const) || failwith "float_interval_lt0: &0 <= hi" in
   let th0 = INST[x_tm, x_var_real; lo_tm, lo_var_real; hi_tm, hi_var_real] FLOAT_INTERVAL_LT0' in
     (MY_PROVE_HYP th o MY_PROVE_HYP lt0_th) th0;;
 

@@ -1,8 +1,14 @@
-(* =========================================================== *)
-(* Formal arithmetic of taylor intervals 2                     *)
-(* Author: Alexey Solovyev                                     *)
-(* Date: 2012-10-27                                            *)
-(* =========================================================== *)
+(* ========================================================================== *)
+(*      Formal verification of nonlinear inequalities in HOL Light            *)
+(*                                                                            *)
+(*      Copyright (c) 2012 Alexey Solovyev                                    *)
+(*                                                                            *)
+(*      This file is distributed under the terms of the MIT licence           *)
+(* ========================================================================== *)
+
+(* -------------------------------------------------------------------------- *)
+(* Formal arithmetic of taylor intervals 2                                    *)
+(* -------------------------------------------------------------------------- *)
 
 needs "taylor/m_taylor_arith.hl";;
 

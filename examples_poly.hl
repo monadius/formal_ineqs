@@ -1,10 +1,20 @@
-(* Multivariate polynomial inequalities *)
-(* Examples are taken from the paper:
-   César Muñoz and Anthony Narkawicz, 
-   Formalization of a Representation of Bernstein Polynomials and Applications to Global Optimization, 
-   Journal of Automated Reasoning, DOI: 10.1007/s10817-012-9256-3
-   http://shemesh.larc.nasa.gov/people/cam/Bernstein/ *)
+(* ========================================================================== *)
+(*      Formal verification of nonlinear inequalities in HOL Light            *)
+(*                                                                            *)
+(*      Copyright (c) 2012 Alexey Solovyev                                    *)
+(*                                                                            *)
+(*      This file is distributed under the terms of the MIT licence           *)
+(* ========================================================================== *)
 
+(* -------------------------------------------------------------------------- *)
+(* Multivariate polynomial inequalities                                       *)
+(* Examples are taken from the paper:                                         *)
+(* César Muñoz and Anthony Narkawicz,                                         *)
+(* Formalization of a Representation of Bernstein Polynomials and             *)
+(* Applications to Global Optimization,                                       *)
+(* Journal of Automated Reasoning, DOI: 10.1007/s10817-012-9256-3             *)
+(* http://shemesh.larc.nasa.gov/people/cam/Bernstein/                         *)
+(* -------------------------------------------------------------------------- *)
 
 (* Set up the loading path:
 load_path := "path to the formal_ineqs directory" :: !load_path;;

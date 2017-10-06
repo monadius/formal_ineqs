@@ -1,8 +1,14 @@
-(* =========================================================== *)
-(* Informal certificate search                                 *)
-(* Author: Alexey Solovyev                                     *)
-(* Date: 2014-07-31                                            *)
-(* =========================================================== *)
+(* ========================================================================== *)
+(*      Formal verification of nonlinear inequalities in HOL Light            *)
+(*                                                                            *)
+(*      Copyright (c) 2014 Alexey Solovyev                                    *)
+(*                                                                            *)
+(*      This file is distributed under the terms of the MIT licence           *)
+(* ========================================================================== *)
+
+(* -------------------------------------------------------------------------- *)
+(* Informal certificate search                                                *)
+(* -------------------------------------------------------------------------- *)
 
 needs "informal/informal_taylor.hl";;
 needs "verifier/certificate.hl";;

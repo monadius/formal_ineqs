@@ -1,5 +1,15 @@
-(* Some inequalities from the Flyspeck project *)
-(* https://github.com/flyspeck/flyspeck *)
+(* ========================================================================== *)
+(*      Formal verification of nonlinear inequalities in HOL Light            *)
+(*                                                                            *)
+(*      Copyright (c) 2012 Alexey Solovyev                                    *)
+(*                                                                            *)
+(*      This file is distributed under the terms of the MIT licence           *)
+(* ========================================================================== *)
+
+(* -------------------------------------------------------------------------- *)
+(* Some inequalities from the Flyspeck project                                *)
+(* https://github.com/flyspeck/flyspeck                                       *)
+(* -------------------------------------------------------------------------- *)
 
 (* Set up the loading path:
 load_path := "path to the formal_ineqs directory" :: !load_path;;

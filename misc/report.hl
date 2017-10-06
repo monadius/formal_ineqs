@@ -1,14 +1,17 @@
-(* =========================================================== *)
-(* Report functions                                            *)
-(* Author: Thomas C. Hales                                     *)
-(* Date: 2011-08-21                                            *)
-(* =========================================================== *)
+(* ========================================================================== *)
+(*      Formal verification of nonlinear inequalities in HOL Light            *)
+(*                                                                            *)
+(*      Copyright (c) 2011 Thomas C. Hales                                    *)
+(*                                                                            *)
+(*      This file is distributed under the terms of the MIT licence           *)
+(* ========================================================================== *)
 
-(* port of error.cc 
-    basic procedures to print messages to the standard output
-   and to count errors.
-
-*)
+(* -------------------------------------------------------------------------- *)
+(* Report functions                                                           *)
+(* port of error.cc                                                           *)
+(* basic procedures to print messages to the standard output                  *)
+(* and to count errors.                                                       *)
+(* -------------------------------------------------------------------------- *)
 
 module Report = struct
 

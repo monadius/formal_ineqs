@@ -1,7 +1,7 @@
 (* ========================================================================== *)
 (*      Formal verification of FPTaylor certificates                          *)
 (*                                                                            *)
-(*      Author: Alexey Solovyev, University of Utah                           *)
+(*      Copyright (c) 2015 Alexey Solovyev, University of Utah                *)
 (*                                                                            *)
 (*      This file is distributed under the terms of the MIT licence           *)
 (* ========================================================================== *)

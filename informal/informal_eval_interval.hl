@@ -1,8 +1,14 @@
-(* =========================================================== *)
-(* Informal interval evaluation of arithmetic expressions      *)
-(* Author: Alexey Solovyev                                     *)
-(* Date: 2012-10-27                                            *)
-(* =========================================================== *)
+(* ========================================================================== *)
+(*      Formal verification of nonlinear inequalities in HOL Light            *)
+(*                                                                            *)
+(*      Copyright (c) 2012 Alexey Solovyev                                    *)
+(*                                                                            *)
+(*      This file is distributed under the terms of the MIT licence           *)
+(* ========================================================================== *)
+
+(* -------------------------------------------------------------------------- *)
+(* Informal interval evaluation of arithmetic expressions                     *)
+(* -------------------------------------------------------------------------- *)
 
 needs "informal/informal_exp.hl";;
 needs "informal/informal_log.hl";;

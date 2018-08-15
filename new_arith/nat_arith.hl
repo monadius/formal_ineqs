@@ -46,6 +46,9 @@ module type Nat_arith_sig =
     val nlt : term -> term -> thm * bool
     val nle : term -> term -> thm * bool
 
+    val nmax : term -> term -> thm
+    val nmin : term -> term -> thm
+
     val nadd : term -> term -> thm
     val nsub : term -> term -> thm
     val nsub_le : term -> term -> thm * thm * bool
@@ -866,6 +869,42 @@ and nle ltm rtm =
       | _ -> error "nle" [ltm; rtm] []
     end
   | _ -> error "nle" [ltm; rtm] [];;
+
+(* ------------------------------------------------------------------------- *)
+(* MAX m n, MIN m n: nmax, nmin                                              *)
+(* ------------------------------------------------------------------------- *)
+
+(* --------------- *)
+(* Theorems        *)
+(* --------------- *)
+
+let max_case1 = (UNDISCH_ALL o ARITH_RULE) `(m <= n <=> T) ==> MAX m n = n`;;
+let max_case2 = (UNDISCH_ALL o ARITH_RULE) `(m <= n <=> F) ==> MAX m n = m`;;
+
+let min_case1 = (UNDISCH_ALL o ARITH_RULE) `(m <= n <=> T) ==> MIN m n = m`;;
+let min_case2 = (UNDISCH_ALL o ARITH_RULE) `(m <= n <=> F) ==> MIN m n = n`;;
+
+(* --------------- *)
+(* Functions       *)
+(* --------------- *)
+
+let nmax ltm rtm =
+  let le_th, flag = nle ltm rtm in
+  if flag then
+    let th0 = INST[rtm, n_var_num; ltm, m_var_num] max_case1 in
+    MY_PROVE_HYP le_th th0
+  else
+    let th0 = INST[ltm, m_var_num; rtm, n_var_num] max_case2 in
+    MY_PROVE_HYP le_th th0;;
+
+let nmin ltm rtm =
+  let le_th, flag = nle ltm rtm in
+  if flag then
+    let th0 = INST[ltm, m_var_num; rtm, n_var_num] min_case1 in
+    MY_PROVE_HYP le_th th0
+  else
+    let th0 = INST[rtm, n_var_num; ltm, m_var_num] min_case2 in
+    MY_PROVE_HYP le_th th0;;
 
 (* ------------------------------------------------------------------------- *)
 (* m + n: nadd                                                               *)

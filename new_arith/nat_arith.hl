@@ -137,9 +137,9 @@ let def_thm i =
   let bi0 = mk_comb(const_array.(i), zero_const) in
   let b0n = mk_comb(const_array.(0), n_var_num) in
   let rhs = mk_binop add_op_num bi0 b0n in
-    prove(mk_eq(bin, rhs), 
-	  REWRITE_TAC[def_array.(i); def_array.(0)] THEN
-            REWRITE_TAC[mul_n_0; ADD_CLAUSES] THEN ARITH_TAC);;
+  prove(mk_eq(bin, rhs), 
+    REWRITE_TAC[def_array.(i); def_array.(0)] THEN
+    REWRITE_TAC[mul_n_0; ADD_CLAUSES] THEN ARITH_TAC);;
 
 let def_thm_array = Array.init maximum def_thm;;
 
@@ -168,12 +168,11 @@ let mk_nat =
   let max_bi = Big_int.big_int_of_int maximum in
   let quo_mod a =
     match a with
-      | Int n ->
-	  Int (n / maximum), n mod maximum
-      | Big_int n ->
-	  let q, r = Big_int.quomod_big_int n max_bi in
-	    num_of_big_int q, Big_int.int_of_big_int r
-      | _ -> error_fmt "mk_nat: rational argument: %s" (string_of_num a) in
+    | Int n -> Int (n / maximum), n mod maximum
+    | Big_int n ->
+      let q, r = Big_int.quomod_big_int n max_bi in
+      num_of_big_int q, Big_int.int_of_big_int r
+    | _ -> error_fmt "mk_nat: rational argument: %s" (string_of_num a) in
   let rec mk n =
     if n =/ num_0 then
       zero_const
@@ -181,11 +180,11 @@ let mk_nat =
       let q, r = quo_mod n in
       let digit = const_array.(r) in
         mk_comb (digit, mk q) in
-    fun n -> 
-      if sign_num n < 0 then 
-	error_fmt "mk_nat: negative argument: %s" (string_of_num n)
-      else
-	mk n;;
+  fun n -> 
+    if sign_num n < 0 then 
+      error_fmt "mk_nat: negative argument: %s" (string_of_num n)
+    else
+      mk n;;
 
 let mk_small_nat =
   let rec mk n =
@@ -195,29 +194,28 @@ let mk_small_nat =
       let q, r = n / maximum, n mod maximum in
       let bit = const_array.(r) in
         mk_comb (bit, mk q) in
-    fun n -> 
-      if n < 0 then 
-	error_fmt "mk_small_nat: negative argument: %d" n
-      else
-	mk n;;
+  fun n -> 
+    if n < 0 then 
+      error_fmt "mk_small_nat: negative argument: %d" n
+    else
+      mk n;;
 
 let dest_nat =
   let max_num = Int maximum in
   let rec dest tm =
     match tm with
-      | Const ("_0", _) -> num_0
-      | Comb (Const (name, _), rtm) ->
-	  let n = max_num */ dest rtm in
-	    n +/ Int (index_of_name name)
-      | _ -> error "dest_nat" [tm] [] in
-    dest;;
+    | Const ("_0", _) -> num_0
+    | Comb (Const (name, _), rtm) ->
+      let n = max_num */ dest rtm in
+      n +/ Int (index_of_name name)
+    | _ -> error "dest_nat" [tm] [] in
+  dest;;
 
 let rec size_nat tm =
   match tm with
-    | Const ("_0", _) -> 0
-    | Comb (Const (name, _), rtm) ->
-	size_nat rtm + 1
-    | _ -> error "size_nat" [tm] [];;
+  | Const ("_0", _) -> 0
+  | Comb (Const (name, _), rtm) -> size_nat rtm + 1
+  | _ -> error "size_nat" [tm] [];;
 
 let print_nat fmt tm =
   try
@@ -237,7 +235,7 @@ let TO_NAT_CONV =
     let h1 = mk_eq (mk_binop div_op_num m_var_num max_const, q_var_num) in
     let h2 = mk_eq (mk_binop mod_op_num m_var_num max_const, r_var_num) in
     let c = mk_eq (m_var_num, 
-		   mk_binop add_op_num (mk_binop mul_op_num max_const q_var_num) r_var_num) in
+       mk_binop add_op_num (mk_binop mul_op_num max_const q_var_num) r_var_num) in
       (UNDISCH_ALL o ARITH_RULE) (mk_imp(h1, mk_imp(h2, c))) in
   let rec conv tm =
     if rand tm = zero_const then
@@ -254,12 +252,12 @@ let TO_NAT_CONV =
       let th = TRANS th1 th2 in
       let ltm, rtm = dest_comb (rand (concl th)) in
       let r_th = conv rtm in
-	TRANS th (AP_TERM ltm r_th) in
-    fun tm ->
-      if (fst o dest_const o rator) tm <> "NUMERAL" then
-	failwith "to_nat_conv"
-      else
-	conv tm;;
+      TRANS th (AP_TERM ltm r_th) in
+  fun tm ->
+    if (fst o dest_const o rator) tm <> "NUMERAL" then
+      failwith "to_nat_conv"
+    else
+      conv tm;;
 
 (* Replaces standard HOL numerals with our numerals in a term *)
 let replace_numerals = rand o concl o DEPTH_CONV TO_NAT_CONV;;
@@ -299,17 +297,17 @@ let suc_max = suc_array.(maximum - 1);;
 
 let rec nsuc tm =
   match tm with
-    | Const ("_0", _) -> suc_0
-    | Comb (Const (name, _), n_tm) ->
-	let i = index_of_name name in
-	  if i = maximum - 1 then
-	    let th = INST[n_tm, n_var_num] suc_max in
-	    let ltm, rtm = dest_comb (rand (concl th)) in
-	      TRANS th (AP_TERM ltm (nsuc (rand rtm)))
-	  else
-	    INST[n_tm, n_var_num] suc_array.(i)
-    | _ -> error "nsuc" [tm] [];;
-	  
+  | Const ("_0", _) -> suc_0
+  | Comb (Const (name, _), n_tm) ->
+    let i = index_of_name name in
+    if i = maximum - 1 then
+      let th = INST[n_tm, n_var_num] suc_max in
+      let ltm, rtm = dest_comb (rand (concl th)) in
+      TRANS th (AP_TERM ltm (nsuc (rand rtm)))
+    else
+      INST[n_tm, n_var_num] suc_array.(i)
+  | _ -> error "nsuc" [tm] [];;
+
 (* ------------------------------------------------------------------------- *)
 (* n = 0: neq0                                                               *)
 (* ------------------------------------------------------------------------- *)
@@ -330,9 +328,9 @@ let eq_0_0 = prove
 let eq_0_i =
   let eq_0_lemma = ARITH_RULE `a + b = 0 <=> a = 0 /\ b = 0` in
   let zero_tm = `0` in
-    fun i ->
-      let concl = mk_eq (mk_eq (mk_comb (const_array.(i), n_var_num), zero_tm), f_const) in
-	prove(concl, REWRITE_TAC[def_array.(i); eq_0_lemma; ARITH_EQ]);;
+  fun i ->
+    let concl = mk_eq (mk_eq (mk_comb (const_array.(i), n_var_num), zero_tm), f_const) in
+    prove(concl, REWRITE_TAC[def_array.(i); eq_0_lemma; ARITH_EQ]);;
 
 let eq0_array = 
   Array.init maximum (fun i -> if (i = 0) then eq_0_0 else eq_0_i i);;
@@ -343,16 +341,16 @@ let eq0_array =
 
 let rec neq0 tm =
   match tm with
-    | Const ("_0", _) -> eq_0_0, true
-    | Comb (Const (name, _), n_tm) ->
-	let i = index_of_name name in
-	  if i = 0 then
-	    let th0 = INST[n_tm, n_var_num] eq_d0_0 in
-	    let th1, flag = neq0 n_tm in
-	      TRANS th0 th1, flag
-	  else
-	    INST[n_tm, n_var_num] eq0_array.(i), false
-    | _ -> error "neq0" [tm] [];;
+  | Const ("_0", _) -> eq_0_0, true
+  | Comb (Const (name, _), n_tm) ->
+    let i = index_of_name name in
+    if i = 0 then
+      let th0 = INST[n_tm, n_var_num] eq_d0_0 in
+      let th1, flag = neq0 n_tm in
+      TRANS th0 th1, flag
+    else
+      INST[n_tm, n_var_num] eq0_array.(i), false
+  | _ -> error "neq0" [tm] [];;
 
 (* ------------------------------------------------------------------------- *)
 (* PRE: npre                                                                 *)
@@ -381,20 +379,20 @@ let pre_d0_n0 = (UNDISCH_ALL o prove)
 (* n = 0 <=> F |- PRE (D0 n) = D{max} (PRE n) *)
 let pre_d0_n1 = (UNDISCH_ALL o prove)
   (mk_imp(`n = 0 <=> F`, 
-	  mk_eq (mk_comb (`PRE`, mk_comb(d0_const, `n:num`)),
-		 mk_comb (const_array.(maximum - 1), `PRE n`))),
+    mk_eq (mk_comb (`PRE`, mk_comb(d0_const, `n:num`)),
+    mk_comb (const_array.(maximum - 1), `PRE n`))),
    REWRITE_TAC[d0_explicit; def_array.(maximum - 1)] THEN ARITH_TAC);;
 
 let pre_th =
   let lemma = (UNDISCH_ALL o ARITH_RULE) `(n = 0 <=> F) ==> (SUC m = n <=> PRE n = m)` in
-    fun i ->
-      let pre = i - 1 in
-      let pre_tm = mk_comb (const_array.(pre), n_var_num) in
-      let suc_th = nsuc pre_tm in
-      let n_tm = rand (concl suc_th) in
-      let n0_th, _ = neq0 n_tm in
-      let th0 = INST[pre_tm, m_var_num; n_tm, n_var_num] lemma in
-	MY_PROVE_HYP n0_th (EQ_MP th0 suc_th);;
+  fun i ->
+    let pre = i - 1 in
+    let pre_tm = mk_comb (const_array.(pre), n_var_num) in
+    let suc_th = nsuc pre_tm in
+    let n_tm = rand (concl suc_th) in
+    let n0_th, _ = neq0 n_tm in
+    let th0 = INST[pre_tm, m_var_num; n_tm, n_var_num] lemma in
+    MY_PROVE_HYP n0_th (EQ_MP th0 suc_th);;
 
 let pre_array = 
   Array.init maximum (fun i -> if i = 0 then TRUTH else pre_th i);;
@@ -408,29 +406,28 @@ let d1_pre_thm = pre_array.(1);;
 let rec npre tm =
   try
     match tm with
-      | Const ("_0", _) -> pre_0
-      | Comb (Const (name, _), n_tm) ->
-	  let i = index_of_name name in
-	    if i = 0 then
-	      let n_th, flag = neq0 n_tm in
-		if flag then
-		  let th = INST[n_tm, n_var_num] pre_d0_n0 in
-		    MY_PROVE_HYP n_th th
-		else
-		  let th0 = INST[n_tm, n_var_num] pre_d0_n1 in
-		  let th1 = MY_PROVE_HYP n_th th0 in
-		  let ltm, rtm = dest_comb (rand (concl th1)) in
-		  let th2 = npre (rand rtm) in
-		    TRANS th1 (AP_TERM ltm th2)
-            else
-	      if i = 1 then
-		if (n_tm = zero_const) then
-		  pre_d1_0
-		else
-		  INST[n_tm, n_var_num] d1_pre_thm
-	      else
-		INST [n_tm, n_var_num] pre_array.(i)
-      | _ -> failwith "npre"
+    | Const ("_0", _) -> pre_0
+    | Comb (Const (name, _), n_tm) ->
+      let i = index_of_name name in
+      if i = 0 then
+        let n_th, flag = neq0 n_tm in
+        if flag then
+          let th = INST[n_tm, n_var_num] pre_d0_n0 in
+          MY_PROVE_HYP n_th th
+        else
+          let th0 = INST[n_tm, n_var_num] pre_d0_n1 in
+          let th1 = MY_PROVE_HYP n_th th0 in
+          let ltm, rtm = dest_comb (rand (concl th1)) in
+          let th2 = npre (rand rtm) in
+          TRANS th1 (AP_TERM ltm th2)
+      else if i = 1 then
+        if (n_tm = zero_const) then
+          pre_d1_0
+        else
+          INST[n_tm, n_var_num] d1_pre_thm
+      else
+        INST [n_tm, n_var_num] pre_array.(i)
+    | _ -> failwith "npre"
   with Failure msg -> error msg [tm] [];;
 
 (* ------------------------------------------------------------------------- *)
@@ -458,48 +455,46 @@ let even_d0 = prove
 let odd_d0 = prove
   (mk_eq (mk_comb (`ODD`, mk_comb (d0_const, `n:num`)), `F`),
    REWRITE_TAC[NOT_ODD; even_d0]);;
-		   
+
 let next_even_th =
   let even_suc_t = prove(`(EVEN (SUC n) <=> T) <=> (EVEN n <=> F)`, REWRITE_TAC[EVEN]) in
   let even_suc_f = prove(`(EVEN (SUC n) <=> F) <=> (EVEN n <=> T)`, REWRITE_TAC[EVEN]) in
-    fun th ->
-      let ltm, rtm = dest_comb (concl th) in
-      let b_tm = rand (rand ltm) in
-      let suc_b = nsuc b_tm in
-      let flag = (fst o dest_const) rtm = "T" in
-      let th0 = SYM (AP_TERM even_const suc_b) in
-      let th1 = AP_THM (AP_TERM eq_const th0) (if flag then f_const else t_const) in
-      let th2 = INST[b_tm, n_var_num] (if flag then even_suc_f else even_suc_t) in
-	EQ_MP (SYM (TRANS th1 th2)) th;;
+  fun th ->
+    let ltm, rtm = dest_comb (concl th) in
+    let b_tm = rand (rand ltm) in
+    let suc_b = nsuc b_tm in
+    let flag = (fst o dest_const) rtm = "T" in
+    let th0 = SYM (AP_TERM even_const suc_b) in
+    let th1 = AP_THM (AP_TERM eq_const th0) (if flag then f_const else t_const) in
+    let th2 = INST[b_tm, n_var_num] (if flag then even_suc_f else even_suc_t) in
+    EQ_MP (SYM (TRANS th1 th2)) th;;
 
 let next_odd_th =
   let odd_suc_t = prove(`(ODD (SUC n) <=> T) <=> (ODD n <=> F)`, REWRITE_TAC[ODD]) in
   let odd_suc_f = prove(`(ODD (SUC n) <=> F) <=> (ODD n <=> T)`, REWRITE_TAC[ODD]) in
-    fun th ->
-      let ltm, rtm = dest_comb (concl th) in
-      let b_tm = rand (rand ltm) in
-      let suc_b = nsuc b_tm in
-      let flag = (fst o dest_const) rtm = "T" in
-      let th0 = SYM (AP_TERM odd_const suc_b) in
-      let th1 = AP_THM (AP_TERM eq_const th0) (if flag then f_const else t_const) in
-      let th2 = INST[b_tm, n_var_num] (if flag then odd_suc_f else odd_suc_t) in
-	EQ_MP (SYM (TRANS th1 th2)) th;;
+  fun th ->
+    let ltm, rtm = dest_comb (concl th) in
+    let b_tm = rand (rand ltm) in
+    let suc_b = nsuc b_tm in
+    let flag = (fst o dest_const) rtm = "T" in
+    let th0 = SYM (AP_TERM odd_const suc_b) in
+    let th1 = AP_THM (AP_TERM eq_const th0) (if flag then f_const else t_const) in
+    let th2 = INST[b_tm, n_var_num] (if flag then odd_suc_f else odd_suc_t) in
+    EQ_MP (SYM (TRANS th1 th2)) th;;
 
 let even_array =
   let r = Array.init maximum (fun i -> even_d0, true) in
-  let _ =
-    for i = 1 to maximum - 1 do
-      r.(i) <- next_even_th (fst r.(i - 1)), i mod 2 = 0
-    done in
-    r;;
+  for i = 1 to maximum - 1 do
+    r.(i) <- next_even_th (fst r.(i - 1)), i mod 2 = 0
+  done;
+  r;;
 
 let odd_array =
   let r = Array.init maximum (fun i -> odd_d0, false) in
-  let _ = 
-    for i = 1 to maximum - 1 do
-      r.(i) <- next_odd_th (fst r.(i - 1)), i mod 2 = 1
-    done in
-    r;;
+  for i = 1 to maximum - 1 do
+    r.(i) <- next_odd_th (fst r.(i - 1)), i mod 2 = 1
+  done;
+  r;;
 
 (* --------------- *)
 (* Functions       *)
@@ -507,19 +502,19 @@ let odd_array =
 
 let neven tm =
   match tm with
-    | Const ("_0", _) -> even_zero, true
-    | Comb (Const (name, _), n_tm) ->
-	let th0, flag = even_array.(index_of_name name) in
-	  INST[n_tm, n_var_num] th0, flag
-    | _ -> error "neven" [tm] [];;
+  | Const ("_0", _) -> even_zero, true
+  | Comb (Const (name, _), n_tm) ->
+    let th0, flag = even_array.(index_of_name name) in
+    INST[n_tm, n_var_num] th0, flag
+  | _ -> error "neven" [tm] [];;
 
 let nodd tm =
   match tm with
-    | Const ("_0", _) -> odd_zero, false
-    | Comb (Const (name, _), n_tm) ->
-	let th0, flag = odd_array.(index_of_name name) in
-	  INST[n_tm, n_var_num] th0, flag
-    | _ -> error "nodd" [tm] [];;
+  | Const ("_0", _) -> odd_zero, false
+  | Comb (Const (name, _), n_tm) ->
+    let th0, flag = odd_array.(index_of_name name) in
+    INST[n_tm, n_var_num] th0, flag
+  | _ -> error "nodd" [tm] [];;
 
 (* ------------------------------------------------------------------------- *)
 (* 0 < n: ngt0                                                               *)
@@ -551,16 +546,16 @@ let gt0_array =
 
 let rec ngt0 tm =
   match tm with
-    | Const ("_0", _) -> gt0_0, false
-    | Comb (Const (name, _), n_tm) ->
-	let i = index_of_name name in
-	  if i = 0 then
-	    let th0 = INST[n_tm, n_var_num] gt0_d0 in
-	    let th1, flag = ngt0 n_tm in
-	      TRANS th0 th1, flag
-	  else
-	    INST[n_tm, n_var_num] gt0_array.(i), true
-    | _ -> error "ngt0" [tm] [];;
+  | Const ("_0", _) -> gt0_0, false
+  | Comb (Const (name, _), n_tm) ->
+    let i = index_of_name name in
+    if i = 0 then
+      let th0 = INST[n_tm, n_var_num] gt0_d0 in
+      let th1, flag = ngt0 n_tm in
+      TRANS th0 th1, flag
+    else
+      INST[n_tm, n_var_num] gt0_array.(i), true
+  | _ -> error "ngt0" [tm] [];;
 
 (* ------------------------------------------------------------------------- *)
 (* m = n: neq                                                                *)
@@ -590,62 +585,54 @@ let gen_di_eq_dj =
        FIRST_ASSUM (MP_TAC o MATCH_MP DIV_MULT_ADD) THEN
        DISCH_THEN (fun th -> REWRITE_TAC[th]) THEN
        SUBGOAL_THEN `i DIV b = 0 /\ j DIV b = 0` (fun th -> REWRITE_TAC[th]) THENL [
-	 FIRST_ASSUM (ASSUME_TAC o MATCH_MP DIV_EQ_0) THEN ASM_REWRITE_TAC[];
-	 ALL_TAC
+         FIRST_ASSUM (ASSUME_TAC o MATCH_MP DIV_EQ_0) THEN ASM_REWRITE_TAC[];
+         ALL_TAC
        ] THEN
        REWRITE_TAC[ADD_0] THEN DISCH_TAC THEN
        UNDISCH_TAC `m * b + i = n * b + j:num` THEN
        ASM_REWRITE_TAC[] THEN ARITH_TAC) in
-    fun i j ->
-      let di_m = mk_comb (const_array.(i), m_var_num) in
-      let dj_n = mk_comb (const_array.(j), n_var_num) in
-      let eq_tm = mk_binop eq_op_num di_m dj_n in
-	if i = j then
-	  prove (mk_eq (eq_tm, mk_binop eq_op_num m_var_num n_var_num), 
-		 REWRITE_TAC[def_array.(i)] THEN ARITH_TAC)
-	else
-	  prove (mk_eq (eq_tm, f_const), 
-		 REWRITE_TAC[def_array.(i); def_array.(j)] THEN
-		   MATCH_MP_TAC aux_th THEN CONV_TAC NUM_REDUCE_CONV);;
+  fun i j ->
+    let di_m = mk_comb (const_array.(i), m_var_num) in
+    let dj_n = mk_comb (const_array.(j), n_var_num) in
+    let eq_tm = mk_binop eq_op_num di_m dj_n in
+    if i = j then
+      prove (mk_eq (eq_tm, mk_binop eq_op_num m_var_num n_var_num), 
+      REWRITE_TAC[def_array.(i)] THEN ARITH_TAC)
+    else
+      prove (mk_eq (eq_tm, f_const), 
+      REWRITE_TAC[def_array.(i); def_array.(j)] THEN
+      MATCH_MP_TAC aux_th THEN CONV_TAC NUM_REDUCE_CONV);;
 
 let gen_next_eq_thm =
   let suc_eq_th = ARITH_RULE `SUC m = SUC n <=> m = n` in
-    fun th ->
-      let ltm, n_tm = (dest_comb o lhand o concl) th in
-      let m_tm = rand ltm in
-      let th0 = INST[m_tm, m_var_num; n_tm, n_var_num] suc_eq_th in
-      let suc_m = nsuc m_tm in
-      let suc_n = nsuc n_tm in
-      let th1 = SYM (MK_COMB ((AP_TERM eq_op_num suc_m), suc_n)) in
-	TRANS (TRANS th1 th0) th;;
+  fun th ->
+    let ltm, n_tm = (dest_comb o lhand o concl) th in
+    let m_tm = rand ltm in
+    let th0 = INST[m_tm, m_var_num; n_tm, n_var_num] suc_eq_th in
+    let suc_m = nsuc m_tm in
+    let suc_n = nsuc n_tm in
+    let th1 = SYM (MK_COMB ((AP_TERM eq_op_num suc_m), suc_n)) in
+    TRANS (TRANS th1 th0) th;;
 
 let eq_array =
   let eqs = Array.init (maximum * maximum) (fun _ -> TRUTH) in
-  let _ =
-    for i = 0 to maximum - 1 do
-      let sym = INST[n_var_num, m_var_num; m_var_num, n_var_num] o CONV_RULE (LAND_CONV SYM_CONV) in
-      let th = ref (gen_di_eq_dj 0 i) in
-      let name_left = name_array.(0) and
-	  name_right = name_array.(i) in
-      let _ = eqs.(index_of_name2 name_left name_right) <- !th in
-      let _ = 
-	if i > 0 then
-	  eqs.(index_of_name2 name_right name_left) <- (sym !th)
-	else 
-	  () in
-	for k = 1 to maximum - i - 1 do
-	  let x = k and y = i + k in
-	  let name_left = name_array.(x) and
-	      name_right = name_array.(y) in
-	  let _ = th := gen_next_eq_thm !th in
-	  let _ = eqs.(index_of_name2 name_left name_right) <- !th in
-	    if y > x then
-	      eqs.(index_of_name2 name_right name_left) <- (sym !th)
-	    else
-	      ()
-	done
-    done in
-    eqs;;
+  for i = 0 to maximum - 1 do
+    let sym = INST[n_var_num, m_var_num; m_var_num, n_var_num] o CONV_RULE (LAND_CONV SYM_CONV) in
+    let th = ref (gen_di_eq_dj 0 i) in
+    let name_left = name_array.(0) and
+        name_right = name_array.(i) in
+    eqs.(index_of_name2 name_left name_right) <- !th;
+    if i > 0 then eqs.(index_of_name2 name_right name_left) <- (sym !th);
+    for k = 1 to maximum - i - 1 do
+      let x = k and y = i + k in
+      let name_left = name_array.(x) and
+          name_right = name_array.(y) in
+      th := gen_next_eq_thm !th;
+      eqs.(index_of_name2 name_left name_right) <- !th;
+      if y > x then eqs.(index_of_name2 name_right name_left) <- (sym !th)
+  	done
+  done;
+  eqs;;
 
 (* --------------- *)
 (* Functions       *)
@@ -653,29 +640,28 @@ let eq_array =
 
 let rec neq ltm rtm =
   match rtm with
-    | Const ("_0", _) ->
-	let th0, flag = neq0 ltm in
-	let th1 = INST[ltm, n_var_num] eq_0_left in
-	  TRANS th1 th0, flag
-    | Comb (Const (name2, _), n_tm) ->
-	begin
-	  match ltm with
-	    | Const ("_0", _) ->
-		let th0, flag = neq0 rtm in
-		let th1 = INST[rtm, n_var_num] eq_0_right in
-		  TRANS th1 th0, flag
-	    | Comb (Const (name1, _), m_tm) ->
-		let i1 = index_of_name name1 and
-		    i2 = index_of_name name2 in
-		let th0 = INST[m_tm, m_var_num; n_tm, n_var_num] eq_array.(i1 * maximum + i2) in
-		  if i1 <> i2 then
-		    th0, false
-		  else
-		    let th1, flag = neq m_tm n_tm in
-		      TRANS th0 th1, flag
-	    | _ -> error "neq" [ltm; rtm] []
-	end
-    | _ -> error "neq" [ltm; rtm] [];;
+  | Const ("_0", _) ->
+    let th0, flag = neq0 ltm in
+    let th1 = INST[ltm, n_var_num] eq_0_left in
+    TRANS th1 th0, flag
+  | Comb (Const (name2, _), n_tm) ->
+    begin
+      match ltm with
+      | Const ("_0", _) ->
+        let th0, flag = neq0 rtm in
+        let th1 = INST[rtm, n_var_num] eq_0_right in
+        TRANS th1 th0, flag
+      | Comb (Const (name1, _), m_tm) ->
+        let i1 = index_of_name name1 and
+            i2 = index_of_name name2 in
+        let th0 = INST[m_tm, m_var_num; n_tm, n_var_num] eq_array.(i1 * maximum + i2) in
+        if i1 <> i2 then th0, false
+        else
+          let th1, flag = neq m_tm n_tm in
+          TRANS th0 th1, flag
+      | _ -> error "neq" [ltm; rtm] []
+    end
+  | _ -> error "neq" [ltm; rtm] [];;
 
 (* ------------------------------------------------------------------------- *)
 (* m < n and m <= n: nlt nle                                                 *)
@@ -697,12 +683,12 @@ let le_0_n = prove
 let gen_0_lt_di i =
   let di_n = mk_comb (const_array.(i), n_var_num) in
   let lt_tm = mk_binop lt_op_num zero_num di_n in
-    if i > 0 then
-      (PURE_REWRITE_RULE[NUMERAL] o EQT_INTRO o prove)
-	(lt_tm, REWRITE_TAC[def_array.(i)] THEN ARITH_TAC)
-    else
-      (PURE_REWRITE_RULE[NUMERAL] o prove)
-	(mk_eq (lt_tm, `0 < n`), REWRITE_TAC[d0_explicit] THEN ARITH_TAC);;
+  if i > 0 then
+    (PURE_REWRITE_RULE[NUMERAL] o EQT_INTRO o prove)
+      (lt_tm, REWRITE_TAC[def_array.(i)] THEN ARITH_TAC)
+  else
+    (PURE_REWRITE_RULE[NUMERAL] o prove)
+      (mk_eq (lt_tm, `0 < n`), REWRITE_TAC[d0_explicit] THEN ARITH_TAC);;
 
 let lt0_array =
   Array.init maximum gen_0_lt_di;;
@@ -717,58 +703,56 @@ let gen_di_lt_dj i j =
       mk_binop lt_op_num m_var_num n_var_num 
     else
       mk_binop le_op_num m_var_num n_var_num in
-    prove(mk_eq(lt_tm, rhs), 
-	  REWRITE_TAC[def_array.(i); def_array.(j)] THEN ARITH_TAC);;
+  prove(mk_eq(lt_tm, rhs), 
+    REWRITE_TAC[def_array.(i); def_array.(j)] THEN ARITH_TAC);;
 
 (* Given a theorem |- D_i(m) < D_j(n) <=> P m n,                        *)
 (* generates the theorem |- SUC(D_i(m)) < SUC(D_j(n)) <=> P m n         *)
 let gen_next_lt_thm =
   let suc_lt_thm = ARITH_RULE `SUC m < SUC n <=> m < n` in
-    fun th ->
-      let ltm, n_tm = (dest_comb o lhand o concl) th in
-      let m_tm = rand ltm in
-      let th0 = INST[m_tm, m_var_num; n_tm, n_var_num] suc_lt_thm in
-      let suc_m = nsuc m_tm in
-      let suc_n = nsuc n_tm in
-      let th1 = SYM (MK_COMB ((AP_TERM lt_op_num suc_m), suc_n)) in
-	TRANS (TRANS th1 th0) th;;
+  fun th ->
+    let ltm, n_tm = (dest_comb o lhand o concl) th in
+    let m_tm = rand ltm in
+    let th0 = INST[m_tm, m_var_num; n_tm, n_var_num] suc_lt_thm in
+    let suc_m = nsuc m_tm in
+    let suc_n = nsuc n_tm in
+    let th1 = SYM (MK_COMB ((AP_TERM lt_op_num suc_m), suc_n)) in
+    TRANS (TRANS th1 th0) th;;
 
 let lt_array =
   let r = Array.init (maximum * maximum) (fun i -> TRUTH) in
-  let _ =
-    for i = 0 to maximum - 1 do
-      let th = ref (gen_di_lt_dj 0 i) in
-      let _ = r.(i) <- !th in
-	for k = 1 to maximum - i - 1 do
-	  let x = k and 
-	      y = i + k in
-	    th := gen_next_lt_thm !th;
-	    r.(x * maximum + y) <- !th
-	done
-    done in
-  let _ =
-    for i = 1 to maximum - 1 do
-      let th = ref (gen_di_lt_dj i 0) in
-      let _ = r.(i * maximum) <- !th in
-	for k = 1 to maximum - i - 1 do
-	  let x = i + k and 
-	      y = k in
-	    th := gen_next_lt_thm !th;
-	    r.(x * maximum + y) <- !th
-	done
-    done in
-    r;;
+  for i = 0 to maximum - 1 do
+    let th = ref (gen_di_lt_dj 0 i) in
+    r.(i) <- !th;
+    for k = 1 to maximum - i - 1 do
+      let x = k and 
+          y = i + k in
+      th := gen_next_lt_thm !th;
+      r.(x * maximum + y) <- !th
+    done
+  done;
+  for i = 1 to maximum - 1 do
+    let th = ref (gen_di_lt_dj i 0) in
+    r.(i * maximum) <- !th;
+    for k = 1 to maximum - i - 1 do
+      let x = i + k and 
+          y = k in
+      th := gen_next_lt_thm !th;
+      r.(x * maximum + y) <- !th
+    done
+  done;
+  r;;
 
 (* Generates the theorem |- D_i(n) <= _0 <=> F (or |- D_0(n) <= _0 <=> n <= _0) *)
 let gen_di_le_0 i =
   let di_n = mk_comb (const_array.(i), n_var_num) in
   let lt_tm = mk_binop le_op_num di_n zero_num in
-    if i > 0 then
-      (PURE_REWRITE_RULE[NUMERAL] o prove)
-	(mk_eq(lt_tm, f_const), REWRITE_TAC[def_array.(i)] THEN ARITH_TAC)
-    else
-      (PURE_REWRITE_RULE[NUMERAL] o prove)
-	(mk_eq(lt_tm, `n <= 0`), REWRITE_TAC[d0_explicit] THEN ARITH_TAC);;
+  if i > 0 then
+    (PURE_REWRITE_RULE[NUMERAL] o prove)
+      (mk_eq(lt_tm, f_const), REWRITE_TAC[def_array.(i)] THEN ARITH_TAC)
+  else
+    (PURE_REWRITE_RULE[NUMERAL] o prove)
+      (mk_eq(lt_tm, `n <= 0`), REWRITE_TAC[d0_explicit] THEN ARITH_TAC);;
 
 let le0_array = 
   Array.init maximum gen_di_le_0;;
@@ -783,47 +767,45 @@ let gen_di_le_dj i j =
       mk_binop lt_op_num m_var_num n_var_num 
     else
       mk_binop le_op_num m_var_num n_var_num in
-    prove(mk_eq(lt_tm, rhs), 
-	  REWRITE_TAC[def_array.(i); def_array.(j)] THEN ARITH_TAC);;
+  prove(mk_eq(lt_tm, rhs), 
+    REWRITE_TAC[def_array.(i); def_array.(j)] THEN ARITH_TAC);;
 
 (* Given a theorem |- D_i(m) <= D_j(n) <=> P m n,               *)
 (* generates the theorem |- SUC(bi(m)) <= SUC(bj(n)) <=> P m n  *)
 let gen_next_le_thm =
   let suc_le_thm  = ARITH_RULE `SUC m <= SUC n <=> m <= n` in
-    fun th ->
-      let ltm, n_tm = (dest_comb o lhand o concl) th in
-      let m_tm = rand ltm in
-      let th0 = INST[m_tm, m_var_num; n_tm, n_var_num] suc_le_thm in
-      let suc_m = nsuc m_tm in
-      let suc_n = nsuc n_tm in
-      let th1 = SYM (MK_COMB ((AP_TERM le_op_num suc_m), suc_n)) in
-	TRANS (TRANS th1 th0) th;;
+  fun th ->
+    let ltm, n_tm = (dest_comb o lhand o concl) th in
+    let m_tm = rand ltm in
+    let th0 = INST[m_tm, m_var_num; n_tm, n_var_num] suc_le_thm in
+    let suc_m = nsuc m_tm in
+    let suc_n = nsuc n_tm in
+    let th1 = SYM (MK_COMB ((AP_TERM le_op_num suc_m), suc_n)) in
+    TRANS (TRANS th1 th0) th;;
 
 let le_array =
   let r = Array.init (maximum * maximum) (fun i -> TRUTH) in
-  let _ =
-    for i = 0 to maximum - 1 do
-      let th = ref (gen_di_le_dj 0 i) in
-      let _ = r.(i) <- !th in
-	for k = 1 to maximum - i - 1 do
-	  let x = k and 
-	      y = i + k in
-	    th := gen_next_le_thm !th;
-	    r.(x * maximum + y) <- !th
-	done
-    done in
-  let _ = 
-    for i = 1 to maximum - 1 do
-      let th = ref (gen_di_le_dj i 0) in
-      let _ = r.(i * maximum) <- !th in
-	for k = 1 to maximum - i - 1 do
-	  let x = i + k and 
-	      y = k in
-	    th := gen_next_le_thm !th;
-	    r.(x * maximum + y) <- !th
-	done
-    done in
-    r;;
+  for i = 0 to maximum - 1 do
+    let th = ref (gen_di_le_dj 0 i) in
+    r.(i) <- !th;
+    for k = 1 to maximum - i - 1 do
+      let x = k and 
+          y = i + k in
+      th := gen_next_le_thm !th;
+      r.(x * maximum + y) <- !th
+    done
+  done;
+  for i = 1 to maximum - 1 do
+    let th = ref (gen_di_le_dj i 0) in
+    r.(i * maximum) <- !th;
+    for k = 1 to maximum - i - 1 do
+      let x = i + k and 
+          y = k in
+      th := gen_next_le_thm !th;
+      r.(x * maximum + y) <- !th
+    done
+  done;
+  r;;
 
 (* --------------- *)
 (* Functions       *)
@@ -831,61 +813,59 @@ let le_array =
 
 let rec nlt ltm rtm =
   match rtm with
-    | Const ("_0", _) ->
-	INST[ltm, n_var_num] lt_n_0, false
-    | Comb (Const (name2, _), n_tm) ->
-	begin
-	  match ltm with
-	    | Const ("_0", _) ->
-		let i = index_of_name name2 in
-		let th0 = INST[n_tm, n_var_num] lt0_array.(i) in
-		  if i = 0 then
-		    let th1, flag = nlt ltm n_tm in
-		      TRANS th0 th1, flag
-		  else
-		    th0, true
-	    | Comb (Const (name1, _), m_tm) ->
-		let i1 = index_of_name name1 and
-		    i2 = index_of_name name2 in
-		let th0 = INST[m_tm, m_var_num; n_tm, n_var_num] lt_array.(i1 * maximum + i2) in
-		let th1, flag = 
-		  if i1 >= i2 then
-		    nlt m_tm n_tm
-		  else
-		    nle m_tm n_tm in
-		  TRANS th0 th1, flag
-	    | _ -> error "nlt" [ltm; rtm] []
-	end
-    | _ -> error "nlt" [ltm; rtm] []
+  | Const ("_0", _) -> INST[ltm, n_var_num] lt_n_0, false
+  | Comb (Const (name2, _), n_tm) ->
+    begin
+      match ltm with
+      | Const ("_0", _) ->
+        let i = index_of_name name2 in
+        let th0 = INST[n_tm, n_var_num] lt0_array.(i) in
+        if i = 0 then
+          let th1, flag = nlt ltm n_tm in
+          TRANS th0 th1, flag
+        else
+          th0, true
+      | Comb (Const (name1, _), m_tm) ->
+        let i1 = index_of_name name1 and
+            i2 = index_of_name name2 in
+        let th0 = INST[m_tm, m_var_num; n_tm, n_var_num] lt_array.(i1 * maximum + i2) in
+        let th1, flag = 
+        if i1 >= i2 then
+          nlt m_tm n_tm
+        else
+          nle m_tm n_tm in
+        TRANS th0 th1, flag
+      | _ -> error "nlt" [ltm; rtm] []
+    end
+  | _ -> error "nlt" [ltm; rtm] []
 
 and nle ltm rtm =
   match ltm with
-    | Const ("_0", _) ->
-	INST[rtm, n_var_num] le_0_n, true
-    | Comb (Const (name1, _), m_tm) ->
-	begin
-	  match rtm with
-	    | Const ("_0", _) ->
-		let i = index_of_name name1 in
-		let th0 = INST[m_tm, n_var_num] le0_array.(i) in
-		  if i = 0 then
-		    let th1, flag = nle m_tm rtm in
-		      TRANS th0 th1, flag
-		  else
-		    th0, false
-	    | Comb (Const (name2, _), n_tm) ->
-		let i1 = index_of_name name1 and
-		    i2 = index_of_name name2 in
-		let th0 = INST[m_tm, m_var_num; n_tm, n_var_num] le_array.(i1 * maximum + i2) in
-		let th1, flag =
-		  if i1 > i2 then
-		    nlt m_tm n_tm
-		  else
-		    nle m_tm n_tm in
-		  TRANS th0 th1, flag
-	    | _ -> error "nle" [ltm; rtm] []
-	end
-    | _ -> error "nle" [ltm; rtm] [];;
+  | Const ("_0", _) -> INST[rtm, n_var_num] le_0_n, true
+  | Comb (Const (name1, _), m_tm) ->
+    begin
+      match rtm with
+      | Const ("_0", _) ->
+        let i = index_of_name name1 in
+        let th0 = INST[m_tm, n_var_num] le0_array.(i) in
+        if i = 0 then
+          let th1, flag = nle m_tm rtm in
+          TRANS th0 th1, flag
+        else
+          th0, false
+      | Comb (Const (name2, _), n_tm) ->
+        let i1 = index_of_name name1 and
+            i2 = index_of_name name2 in
+        let th0 = INST[m_tm, m_var_num; n_tm, n_var_num] le_array.(i1 * maximum + i2) in
+        let th1, flag =
+        if i1 > i2 then
+          nlt m_tm n_tm
+        else
+          nle m_tm n_tm in
+        TRANS th0 th1, flag
+      | _ -> error "nle" [ltm; rtm] []
+    end
+  | _ -> error "nle" [ltm; rtm] [];;
 
 (* ------------------------------------------------------------------------- *)
 (* m + n: nadd                                                               *)
@@ -900,42 +880,40 @@ let cadd_n_0 = prove(`SUC (n + _0) = SUC n`, REWRITE_TAC[add_n_0]);;
 
 let th_add_right_next =
   let suc_add_right = ARITH_RULE `SUC(m + n) = m + SUC n` in
-    fun th ->
-      let lhs, rhs = dest_eq (concl th) in
-      let ltm, rtm = dest_comb rhs in
-      let name = fst (dest_const ltm) in
-      let suc_th = AP_TERM suc_op_num th in
-      let th_rhs = INST[rtm, n_var_num] suc_array.(index_of_name name) in
-      let ltm, rarg = dest_comb lhs in
-      let larg = rand ltm in
-      let th1 = INST[larg, m_var_num; rarg, n_var_num] suc_add_right in
-      let name = fst (dest_const (rator rarg)) in
-      let th2 = suc_array.(index_of_name name) in
-      let th_lhs = TRANS th1 (AP_TERM ltm th2) in
-	TRANS (TRANS (SYM th_lhs) suc_th) th_rhs;;
+  fun th ->
+    let lhs, rhs = dest_eq (concl th) in
+    let ltm, rtm = dest_comb rhs in
+    let name = fst (dest_const ltm) in
+    let suc_th = AP_TERM suc_op_num th in
+    let th_rhs = INST[rtm, n_var_num] suc_array.(index_of_name name) in
+    let ltm, rarg = dest_comb lhs in
+    let larg = rand ltm in
+    let th1 = INST[larg, m_var_num; rarg, n_var_num] suc_add_right in
+    let name = fst (dest_const (rator rarg)) in
+    let th2 = suc_array.(index_of_name name) in
+    let th_lhs = TRANS th1 (AP_TERM ltm th2) in
+    TRANS (TRANS (SYM th_lhs) suc_th) th_rhs;;
 
 let add_array =
   let r = Array.init (maximum * maximum) (fun i -> TRUTH, false) in
-    (* |- D0 m + D0 n = D0 (m + n) *)
+  (* |- D0 m + D0 n = D0 (m + n) *)
   let d0_add = prove
     (mk_eq (mk_binop add_op_num (mk_comb (d0_const, m_var_num)) (mk_comb (d0_const, n_var_num)),
             mk_comb (d0_const, mk_binop add_op_num m_var_num n_var_num)),
      REWRITE_TAC[d0_explicit] THEN ARITH_TAC) in
-  let _ =
-    for i = 0 to maximum - 1 do
-      let th0 =
-	if i = 0 then
-	  d0_add
-	else
-	  INST[n_var_num, m_var_num; m_var_num, n_var_num]
+  for i = 0 to maximum - 1 do
+    let th0 =
+      if i = 0 then d0_add
+      else
+        INST[n_var_num, m_var_num; m_var_num, n_var_num]
             (ONCE_REWRITE_RULE[ADD_AC] (fst r.(i))) in
-      let _ = r.(i * maximum) <- (th0, false) in
-	for j = 1 to maximum - 1 do
-	  let th, _ = r.(i * maximum + j - 1) in
-	    r.(i * maximum + j) <- (th_add_right_next th, i + j >= maximum)
-	done
-    done in
-    r;;
+    r.(i * maximum) <- (th0, false);
+    for j = 1 to maximum - 1 do
+      let th, _ = r.(i * maximum + j - 1) in
+      r.(i * maximum + j) <- (th_add_right_next th, i + j >= maximum)
+    done
+  done;
+  r;;
 
 (* |- SUC (D_i(m) + D_j(n)) = D_p(...) *)
 let th_cadd i j =
@@ -945,17 +923,16 @@ let th_cadd i j =
   let ltm, rtm = dest_comb rtm in
   let name = fst (dest_const ltm) in
   let suc_th = INST[rtm, n_var_num] suc_array.(index_of_name name) in
-    TRANS th0 suc_th;;
+  TRANS th0 suc_th;;
 
 let cadd_array =
   let r = Array.init (maximum * maximum) (fun i -> TRUTH, false) in
-  let _ =
-    for i = 0 to maximum - 1 do
-      for j = 0 to maximum - 1 do
-	r.(i * maximum + j) <- (th_cadd i j, i + j + 1 >= maximum)
-      done
-    done in
-    r;;
+  for i = 0 to maximum - 1 do
+    for j = 0 to maximum - 1 do
+      r.(i * maximum + j) <- (th_cadd i j, i + j + 1 >= maximum)
+    done
+  done;
+  r;;
 
 (* --------------- *)
 (* Functions       *)
@@ -963,51 +940,49 @@ let cadd_array =
 
 let rec nadd ltm rtm =
   match ltm with
-    | Const ("_0", _) ->
-	INST[rtm, n_var_num] add_0_n
-    | Comb (Const (name1, _), m_tm) ->
-	begin
-	  match rtm with
-	    | Const ("_0", _) ->
-		INST[ltm, n_var_num] add_n_0
-	    | Comb (Const (name2, _), n_tm) ->
-		let i1 = index_of_name name1 and
-		    i2 = index_of_name name2 in
-		let th0, cflag = add_array.(i1 * maximum + i2) in
-		let th = INST[m_tm, m_var_num; n_tm, n_var_num] th0 in
-		let ltm = rator (rand (concl th)) in
-		  if cflag then
-		    TRANS th (AP_TERM ltm (nadc m_tm n_tm))
-		  else
-		    TRANS th (AP_TERM ltm (nadd m_tm n_tm))
-	    | _ -> error "nadd" [ltm; rtm] []
-	end
-    | _ -> error "nadd" [ltm; rtm] []
+  | Const ("_0", _) -> INST[rtm, n_var_num] add_0_n
+  | Comb (Const (name1, _), m_tm) ->
+    begin
+      match rtm with
+      | Const ("_0", _) -> INST[ltm, n_var_num] add_n_0
+      | Comb (Const (name2, _), n_tm) ->
+        let i1 = index_of_name name1 and
+            i2 = index_of_name name2 in
+        let th0, cflag = add_array.(i1 * maximum + i2) in
+        let th = INST[m_tm, m_var_num; n_tm, n_var_num] th0 in
+        let ltm = rator (rand (concl th)) in
+        if cflag then
+          TRANS th (AP_TERM ltm (nadc m_tm n_tm))
+        else
+          TRANS th (AP_TERM ltm (nadd m_tm n_tm))
+      | _ -> error "nadd" [ltm; rtm] []
+    end
+  | _ -> error "nadd" [ltm; rtm] []
 
 and nadc ltm rtm =
   match ltm with
-    | Const ("_0", _) ->
-	let th = INST[rtm, n_var_num] cadd_0_n in
-	  TRANS th (nsuc rtm)
-    | Comb (Const (name1, _), m_tm) ->
-	begin
-	  match rtm with
-	    | Const ("_0", _) ->
-		let th = INST[ltm, n_var_num] cadd_n_0 in
-		  TRANS th (nsuc ltm)
-	    | Comb (Const (name2, _), n_tm) ->
-		let i1 = index_of_name name1 and
-		    i2 = index_of_name name2 in
-		let th0, cflag = cadd_array.(i1 * maximum + i2) in
-		let th = INST[m_tm, m_var_num; n_tm, n_var_num] th0 in
-		let ltm = rator (rand (concl th)) in
-		  if cflag then
-		    TRANS th (AP_TERM ltm (nadc m_tm n_tm))
-		  else
-		    TRANS th (AP_TERM ltm (nadd m_tm n_tm))
-	    | _ -> error "nadc" [ltm; rtm] []
-	end
-    | _ -> error "nadc" [ltm; rtm] [];;
+  | Const ("_0", _) ->
+    let th = INST[rtm, n_var_num] cadd_0_n in
+    TRANS th (nsuc rtm)
+  | Comb (Const (name1, _), m_tm) ->
+    begin
+      match rtm with
+      | Const ("_0", _) ->
+        let th = INST[ltm, n_var_num] cadd_n_0 in
+        TRANS th (nsuc ltm)
+      | Comb (Const (name2, _), n_tm) ->
+        let i1 = index_of_name name1 and
+            i2 = index_of_name name2 in
+        let th0, cflag = cadd_array.(i1 * maximum + i2) in
+        let th = INST[m_tm, m_var_num; n_tm, n_var_num] th0 in
+        let ltm = rator (rand (concl th)) in
+        if cflag then
+          TRANS th (AP_TERM ltm (nadc m_tm n_tm))
+        else
+          TRANS th (AP_TERM ltm (nadd m_tm n_tm))
+      | _ -> error "nadc" [ltm; rtm] []
+    end
+  | _ -> error "nadc" [ltm; rtm] [];;
 
 (* ------------------------------------------------------------------------- *)
 (* m - n: nsub, nsub_le                                                      *)
@@ -1029,36 +1004,36 @@ let nsub ltm rtm =
   let m = dest_nat ltm and
       n = dest_nat rtm in
   let t = m -/ n in
-    if sign_num t >= 0 then
-      let t_tm = mk_nat t in
-      let th0 = INST[rtm, n_var_num; t_tm, t_var_num; ltm, m_var_num] sub_lemma1 in
-      let th_add = nadd rtm t_tm in
-	MY_PROVE_HYP th_add th0
-    else
-      let t_tm = mk_nat (abs_num t) in
-      let th0 = INST[ltm, m_var_num; t_tm, t_var_num; rtm, n_var_num] sub_lemma2 in
-      let th_add = nadd ltm t_tm in
-	MY_PROVE_HYP th_add th0;;
+  if sign_num t >= 0 then
+    let t_tm = mk_nat t in
+    let th0 = INST[rtm, n_var_num; t_tm, t_var_num; ltm, m_var_num] sub_lemma1 in
+    let th_add = nadd rtm t_tm in
+    MY_PROVE_HYP th_add th0
+  else
+    let t_tm = mk_nat (abs_num t) in
+    let th0 = INST[ltm, m_var_num; t_tm, t_var_num; rtm, n_var_num] sub_lemma2 in
+    let th_add = nadd ltm t_tm in
+    MY_PROVE_HYP th_add th0;;
 
 (* Returns either (tm1 - tm2, tm2 <= tm1, true) or (tm2 - tm1, tm1 <= tm2, false) *)
 let nsub_le tm1 tm2 =
   let m = dest_nat tm1 and
       n = dest_nat tm2 in
   let t = m -/ n in
-    if sign_num t >= 0 then
-      let t_tm = mk_nat t in
-      let inst = INST[tm2, n_var_num; t_tm, t_var_num; tm1, m_var_num] in
-      let th_sub = inst sub_lemma1 and
-	  th_le = inst le_lemma and
-	  th_add = nadd tm2 t_tm in
-	(MY_PROVE_HYP th_add th_sub, MY_PROVE_HYP th_add th_le, true)
-    else
-      let t_tm = mk_nat (abs_num t) in
-      let inst = INST[tm2, m_var_num; t_tm, t_var_num; tm1, n_var_num] in
-      let th_sub = inst sub_lemma1 and
-	  th_le = inst le_lemma and
-	  th_add = nadd tm1 t_tm in
-	(MY_PROVE_HYP th_add th_sub, MY_PROVE_HYP th_add th_le, false);;
+  if sign_num t >= 0 then
+    let t_tm = mk_nat t in
+    let inst = INST[tm2, n_var_num; t_tm, t_var_num; tm1, m_var_num] in
+    let th_sub = inst sub_lemma1 and
+        th_le = inst le_lemma and
+        th_add = nadd tm2 t_tm in
+    (MY_PROVE_HYP th_add th_sub, MY_PROVE_HYP th_add th_le, true)
+  else
+    let t_tm = mk_nat (abs_num t) in
+    let inst = INST[tm2, m_var_num; t_tm, t_var_num; tm1, n_var_num] in
+    let th_sub = inst sub_lemma1 and
+        th_le = inst le_lemma and
+        th_add = nadd tm1 t_tm in
+    (MY_PROVE_HYP th_add th_sub, MY_PROVE_HYP th_add th_le, false);;
 
 (* ------------------------------------------------------------------------- *)
 (* m * n: nmul                                                               *)
@@ -1079,7 +1054,7 @@ let mul_1_n, mul_n_1 =
   let one_const = mk_comb (const_array.(1), zero_num) in
   let cond = mk_eq (mk_binop mul_op_num one_const n_var_num, n_var_num) in
   let th = (REWRITE_RULE[NUMERAL] o prove)(cond, REWRITE_TAC[def_array.(1)] THEN ARITH_TAC) in
-    th, ONCE_REWRITE_RULE[MULT_AC] th;;
+  th, ONCE_REWRITE_RULE[MULT_AC] th;;
 
 (* |- D0 n * t = D0 (n * t) *)
 let mul_d0_t = prove
@@ -1093,29 +1068,28 @@ let mul_t_d0 = ONCE_REWRITE_RULE[MULT_AC] mul_d0_t;;
 (* Multiplication table *)
 let mul_th_next_right =
   let mul_suc_right = ARITH_RULE `m * SUC(n) = m * n + m` in
-    fun th ->
-      let ltm, t_tm = dest_comb (concl th) in
-      let ltm, rtm = dest_comb (rand ltm) in
-      let m_tm = rand ltm in
-      let th0 = INST[m_tm, m_var_num; rtm, n_var_num] mul_suc_right in
-      let th1 = AP_THM (AP_TERM add_op_num th) m_tm in
-      let sum_th = nadd t_tm m_tm in
-      let th2 = TRANS (TRANS th0 th1) sum_th in
-      let cn = fst (dest_const (rator rtm)) in
-      let th_suc = INST[zero_const, n_var_num] suc_array.(index_of_name cn) in
-      let th3 = AP_TERM (mk_comb (mul_op_num, m_tm)) th_suc in
-	TRANS (SYM th3) th2;;
+  fun th ->
+    let ltm, t_tm = dest_comb (concl th) in
+    let ltm, rtm = dest_comb (rand ltm) in
+    let m_tm = rand ltm in
+    let th0 = INST[m_tm, m_var_num; rtm, n_var_num] mul_suc_right in
+    let th1 = AP_THM (AP_TERM add_op_num th) m_tm in
+    let sum_th = nadd t_tm m_tm in
+    let th2 = TRANS (TRANS th0 th1) sum_th in
+    let cn = fst (dest_const (rator rtm)) in
+    let th_suc = INST[zero_const, n_var_num] suc_array.(index_of_name cn) in
+    let th3 = AP_TERM (mk_comb (mul_op_num, m_tm)) th_suc in
+    TRANS (SYM th3) th2;;
 
 let mul_array = 
   let r = Array.init (maximum * maximum) (fun i -> TRUTH) in
-  let _ =
-    for i = 1 to maximum - 1 do
-      let th1 = INST[mk_comb (const_array.(i), zero_const), n_var_num] mul_n_1 in
-      let _ = r.(i * maximum + 1) <- th1 in
-	for j = 2 to maximum - 1 do
-	  r.(i * maximum + j) <- mul_th_next_right r.(i * maximum + j - 1)
-	done
-    done in
+  for i = 1 to maximum - 1 do
+    let th1 = INST[mk_comb (const_array.(i), zero_const), n_var_num] mul_n_1 in
+    r.(i * maximum + 1) <- th1;
+    for j = 2 to maximum - 1 do
+      r.(i * maximum + j) <- mul_th_next_right r.(i * maximum + j - 1)
+    done
+  done;
   r;;
 
 (* General multiplication theorem *)
@@ -1128,66 +1102,67 @@ let prod_lemma =
                  add (r_var_num, mk_comb (d0_const, n_var_num))) in
   let rhs = add (mul (t_var_num, r_var_num),
                  mk_comb (d0_const, add (mk_comb (d0_const, mul (m_var_num, n_var_num)),
-					 add (mul (m_var_num, r_var_num),
+                                         add (mul (m_var_num, r_var_num),
                                               mul (n_var_num, t_var_num))))) in
-    prove(mk_eq(lhs, rhs),
-          REWRITE_TAC[LEFT_ADD_DISTRIB; RIGHT_ADD_DISTRIB] THEN
-            REWRITE_TAC[mul_d0_t; mul_t_d0] THEN
-            ONCE_REWRITE_TAC[GSYM ADD_ASSOC] THEN
-            REWRITE_TAC[fst add_array.(0)] THEN
-            REWRITE_TAC[ADD_AC; MULT_AC]);;
+  prove(mk_eq(lhs, rhs),
+        REWRITE_TAC[LEFT_ADD_DISTRIB; RIGHT_ADD_DISTRIB] THEN
+          REWRITE_TAC[mul_d0_t; mul_t_d0] THEN
+          ONCE_REWRITE_TAC[GSYM ADD_ASSOC] THEN
+          REWRITE_TAC[fst add_array.(0)] THEN
+          REWRITE_TAC[ADD_AC; MULT_AC]);;
 
 let dest_op tm =
   match tm with
-    | Comb (Comb (_, ltm), rtm) -> ltm, rtm
-    | _ -> error "dest_op" [tm] [];;
+  | Comb (Comb (_, ltm), rtm) -> ltm, rtm
+  | _ -> error "dest_op" [tm] [];;
 
 (* |- D_i(m) * D_j(n) = D_p(D_q(m * n) + m * D_j(0) + n * D_i(0))   *)
 (* where D_p(D_q(0)) = i * j                                        *)
 let gen_mul_thm =
   let add_assoc = SPEC_ALL ADD_ASSOC in
-    fun i j ->
-      let di_0 = mk_comb (const_array.(i), zero_const) and
-	  dj_0 = mk_comb (const_array.(j), zero_const) in
-      let def_i = INST[m_var_num, n_var_num] def_thm_array.(i) in
-      let def_j = def_thm_array.(j) in
-      let th0 = MK_COMB (AP_TERM mul_op_num def_i, def_j) in
-      let th1 = TRANS th0 (INST[di_0, t_var_num; dj_0, r_var_num] prod_lemma) in
-      let mul_th = mul_array.(i * maximum + j) in
-      let larg, rarg = dest_op (rand (concl th1)) in
-      let th2 = TRANS th1 (AP_THM (AP_TERM add_op_num mul_th) rarg) in
-      let larg = rand (concl mul_th) in
-      let b_low, b_high = dest_comb larg in
-      let rtm = rand rarg in
-      let th_add = INST[b_high, m_var_num; rtm, n_var_num]
-	(fst add_array.(index_of_name2 (fst (dest_const b_low)) d0_name)) in
-	if i * j < maximum then
-	  let ltm, rtm = dest_op (rand (rand (concl th_add))) in
-	  let add_0 = AP_TERM b_low (INST[rtm, n_var_num] add_0_n) in
-            TRANS th2 (TRANS th_add add_0)
-	else
-	  let larg, rtm = dest_op (rand (rand (concl th_add))) in
-	  let rarg, rtm = dest_op rtm in
-	  let th_assoc = INST[larg, m_var_num; rarg, n_var_num; rtm, p_var_num] add_assoc in
-	  let mn = rand rarg in
-	  let b_high = rator b_high in
-	  let th_add2' = INST[zero_const, m_var_num; mn, n_var_num]
-	    (fst add_array.(index_of_name2 (fst (dest_const b_high)) d0_name)) in
-	  let add_0 = AP_TERM b_high (INST[mn, n_var_num] add_0_n) in
-	  let th_add2 = TRANS th_add2' add_0 in
-	  let th3 = TRANS th_assoc (AP_THM (AP_TERM add_op_num th_add2) rtm) in
-	  let th4 = TRANS th_add (AP_TERM b_low th3) in
-            TRANS th2 th4;;
+  fun i j ->
+    let di_0 = mk_comb (const_array.(i), zero_const) and
+        dj_0 = mk_comb (const_array.(j), zero_const) in
+    let def_i = INST[m_var_num, n_var_num] def_thm_array.(i) in
+    let def_j = def_thm_array.(j) in
+    let th0 = MK_COMB (AP_TERM mul_op_num def_i, def_j) in
+    let th1 = TRANS th0 (INST[di_0, t_var_num; dj_0, r_var_num] prod_lemma) in
+    let mul_th = mul_array.(i * maximum + j) in
+    let larg, rarg = dest_op (rand (concl th1)) in
+    let th2 = TRANS th1 (AP_THM (AP_TERM add_op_num mul_th) rarg) in
+    let larg = rand (concl mul_th) in
+    let b_low, b_high = dest_comb larg in
+    let rtm = rand rarg in
+    let th_add = 
+      INST[b_high, m_var_num; rtm, n_var_num]
+          (fst add_array.(index_of_name2 (fst (dest_const b_low)) d0_name)) in
+    if i * j < maximum then
+      let ltm, rtm = dest_op (rand (rand (concl th_add))) in
+      let add_0 = AP_TERM b_low (INST[rtm, n_var_num] add_0_n) in
+      TRANS th2 (TRANS th_add add_0)
+    else
+      let larg, rtm = dest_op (rand (rand (concl th_add))) in
+      let rarg, rtm = dest_op rtm in
+      let th_assoc = INST[larg, m_var_num; rarg, n_var_num; rtm, p_var_num] add_assoc in
+      let mn = rand rarg in
+      let b_high = rator b_high in
+      let th_add2' = 
+        INST[zero_const, m_var_num; mn, n_var_num]
+            (fst add_array.(index_of_name2 (fst (dest_const b_high)) d0_name)) in
+      let add_0 = AP_TERM b_high (INST[mn, n_var_num] add_0_n) in
+      let th_add2 = TRANS th_add2' add_0 in
+      let th3 = TRANS th_assoc (AP_THM (AP_TERM add_op_num th_add2) rtm) in
+      let th4 = TRANS th_add (AP_TERM b_low th3) in
+      TRANS th2 th4;;
 
 let gen_mul_array =
   let r = Array.init (maximum * maximum) (fun i -> TRUTH) in
-  let _ =
-    for i = 1 to maximum - 1 do
-      for j = 1 to maximum - 1 do
-	r.(i * maximum + j) <- gen_mul_thm i j
-      done
-    done in
-    r;;
+  for i = 1 to maximum - 1 do
+    for j = 1 to maximum - 1 do
+      r.(i * maximum + j) <- gen_mul_thm i j
+    done
+  done;
+  r;;
 
 (* |- D_i(m) * D_j(0) = D_p(D_q(0) + m * D_j(0))     *)
 (* where i * j = D_p(D_q(0))                         *)
@@ -1200,47 +1175,46 @@ let mul1_right_th i j =
   let tm2_th = INST[rand(tm2p), n_var_num] add_n_0 in
   let tm23_th = TRANS (AP_TERM tm2p tm3_th) tm2_th in
   let ltm, rtm = dest_comb tm1 in
-    if (i * j < maximum) then
-      let tm1_th = TRANS (AP_TERM ltm (INST[m_var_num, n_var_num] mul_n_0)) d0_0 in
-      let tm123_th' = TRANS (INST[tm23, n_var_num] add_0_n) tm23_th in
-      let tm123_th = TRANS (AP_THM (AP_TERM add_op_num tm1_th) tm23) tm123_th' in
-        TRANS th0 (AP_TERM b_low tm123_th)
-    else
-      let tm1_th = AP_TERM ltm (INST[m_var_num, n_var_num] mul_n_0) in
-      let tm123_th = MK_COMB(AP_TERM add_op_num tm1_th, tm23_th) in
-        TRANS th0 (AP_TERM b_low tm123_th);;
+  if (i * j < maximum) then
+    let tm1_th = TRANS (AP_TERM ltm (INST[m_var_num, n_var_num] mul_n_0)) d0_0 in
+    let tm123_th' = TRANS (INST[tm23, n_var_num] add_0_n) tm23_th in
+    let tm123_th = TRANS (AP_THM (AP_TERM add_op_num tm1_th) tm23) tm123_th' in
+    TRANS th0 (AP_TERM b_low tm123_th)
+  else
+    let tm1_th = AP_TERM ltm (INST[m_var_num, n_var_num] mul_n_0) in
+    let tm123_th = MK_COMB(AP_TERM add_op_num tm1_th, tm23_th) in
+    TRANS th0 (AP_TERM b_low tm123_th);;
 
 (* |- D_j(0) * D_i(m) = D_p(D_q(0) + D_j(0) * D_i(m) *)
 let mul1_left_th =
   let MULT_AC' = CONJUNCT1 MULT_AC in  
-    fun th ->
-      let lhs, rhs = dest_eq (concl th) in
-      let ltm, rtm = dest_op lhs in
-      let th_lhs = INST[ltm, n_var_num; rtm, m_var_num] MULT_AC' in
-      let btm, rtm = dest_comb rhs in
-      let larg, rarg = dest_op rtm in
-	if (is_comb larg) then
-	  let ltm, rtm = dest_op rarg in
-	  let th_rhs' = INST[ltm, m_var_num; rtm, n_var_num] MULT_AC' in
-	  let th_rhs = AP_TERM (mk_comb(add_op_num, larg)) th_rhs' in
-            TRANS th_lhs (TRANS th (AP_TERM btm th_rhs))
-	else
-	  let th_rhs = INST[larg, m_var_num; rarg, n_var_num] MULT_AC' in
-            TRANS th_lhs (TRANS th (AP_TERM btm th_rhs));;
+  fun th ->
+    let lhs, rhs = dest_eq (concl th) in
+    let ltm, rtm = dest_op lhs in
+    let th_lhs = INST[ltm, n_var_num; rtm, m_var_num] MULT_AC' in
+    let btm, rtm = dest_comb rhs in
+    let larg, rarg = dest_op rtm in
+    if is_comb larg then
+      let ltm, rtm = dest_op rarg in
+      let th_rhs' = INST[ltm, m_var_num; rtm, n_var_num] MULT_AC' in
+      let th_rhs = AP_TERM (mk_comb(add_op_num, larg)) th_rhs' in
+      TRANS th_lhs (TRANS th (AP_TERM btm th_rhs))
+    else
+      let th_rhs = INST[larg, m_var_num; rarg, n_var_num] MULT_AC' in
+      TRANS th_lhs (TRANS th (AP_TERM btm th_rhs));;
 
 let mul1_right_array, mul1_left_array =
   let right = Array.init (maximum * maximum) (fun i -> TRUTH, false) and
       left = Array.init (maximum * maximum) (fun i -> TRUTH, false) in
-  let _ =
-    for i = 1 to maximum - 1 do
-      for j = 1 to maximum - 1 do
-	let th = mul1_right_th i j in
-	let add_flag = (i * j >= maximum) in
-	  right.(i * maximum + j) <- (th, add_flag);
-	  left.(j * maximum + i) <- (mul1_left_th th, add_flag)
-      done
-    done in
-    right, left;;
+  for i = 1 to maximum - 1 do
+    for j = 1 to maximum - 1 do
+      let th = mul1_right_th i j in
+      let add_flag = (i * j >= maximum) in
+      right.(i * maximum + j) <- (th, add_flag);
+      left.(j * maximum + i) <- (mul1_left_th th, add_flag)
+    done
+  done;
+  right, left;;
 
 (* --------------- *)
 (* Functions       *)
@@ -1249,166 +1223,161 @@ let mul1_right_array, mul1_left_array =
 (* Multiplies arg and tm (= D_{tm_index}(_0)) *)
 let rec nmul1_right arg tm tm_index =
   match arg with
-    | Const ("_0", _) ->
-	INST[tm, n_var_num] mul_0_n
-    | Comb (Const (name, _), m_tm) ->
-	begin
-	  let i = index_of_name name in
-	    if i = 0 then
-	      let th = INST[m_tm, n_var_num; tm, t_var_num] mul_d0_t in
-		TRANS th (AP_TERM d0_const (nmul1_right m_tm tm tm_index))
-	    else
-	      match m_tm with
-		| Const ("_0", _) ->
-		    mul_array.(i * maximum + tm_index)
-		| _ ->
-		    let th', add_flag = mul1_right_array.(i * maximum + tm_index) in
-		    let th = INST[m_tm, m_var_num] th' in
-		      if add_flag then
-			let ltm, rtm = dest_comb (rand (concl th)) in
-			let lplus, rarg = dest_comb rtm in
-			let th2 = AP_TERM lplus (nmul1_right m_tm tm tm_index) in
-			let th_add = uncurry nadd (dest_op (rand (concl th2))) in
-			  TRANS th (AP_TERM ltm (TRANS th2 th_add))
-		      else
-			let ltm = rator (rand (concl th)) in
-			let th2 = AP_TERM ltm (nmul1_right m_tm tm tm_index) in
-			  TRANS th th2
-	end
-    | _ -> error "nmul1_right" [arg; tm] [];;
+  | Const ("_0", _) -> INST[tm, n_var_num] mul_0_n
+  | Comb (Const (name, _), m_tm) ->
+    begin
+      let i = index_of_name name in
+      if i = 0 then
+        let th = INST[m_tm, n_var_num; tm, t_var_num] mul_d0_t in
+        TRANS th (AP_TERM d0_const (nmul1_right m_tm tm tm_index))
+      else
+        match m_tm with
+        | Const ("_0", _) ->
+          mul_array.(i * maximum + tm_index)
+        | _ ->
+          let th', add_flag = mul1_right_array.(i * maximum + tm_index) in
+          let th = INST[m_tm, m_var_num] th' in
+          if add_flag then
+            let ltm, rtm = dest_comb (rand (concl th)) in
+            let lplus, rarg = dest_comb rtm in
+            let th2 = AP_TERM lplus (nmul1_right m_tm tm tm_index) in
+            let th_add = uncurry nadd (dest_op (rand (concl th2))) in
+            TRANS th (AP_TERM ltm (TRANS th2 th_add))
+          else
+            let ltm = rator (rand (concl th)) in
+            let th2 = AP_TERM ltm (nmul1_right m_tm tm tm_index) in
+            TRANS th th2
+    end
+  | _ -> error "nmul1_right" [arg; tm] [];;
 
 (* Multiplies tm (= D_{tm_index}(_0)) and arg *)
 let rec nmul1_left tm tm_index arg =
   match arg with
-    | Const ("_0", _) ->
-	INST[tm, n_var_num] mul_n_0
-    | Comb (Const (name, _), m_tm) ->
-	begin
-	  let i = index_of_name name in
-	    if i = 0 then
-	      let th = INST[m_tm, n_var_num; tm, t_var_num] mul_t_d0 in
-		TRANS th (AP_TERM d0_const (nmul1_left tm tm_index m_tm))
-	    else
-	      match m_tm with
-		| Const ("_0", _) ->
-		    mul_array.(tm_index * maximum + i)
-		| _ ->
-		    let th', add_flag = mul1_left_array.(tm_index * maximum + i) in
-		    let th = INST[m_tm, m_var_num] th' in
-		      if add_flag then
-			let ltm, rtm = dest_comb (rand (concl th)) in
-			let lplus, rarg = dest_comb rtm in
-			let th2 = AP_TERM lplus (nmul1_left tm tm_index m_tm) in
-			let th_add = uncurry nadd (dest_op (rand (concl th2))) in
-			  TRANS th (AP_TERM ltm (TRANS th2 th_add))
-		      else
-			let ltm = rator (rand (concl th)) in
-			let th2 = AP_TERM ltm (nmul1_left tm tm_index m_tm) in
-			  TRANS th th2
-	end
-    | _ -> error "nmul1_left" [tm; arg] [];;
+  | Const ("_0", _) -> INST[tm, n_var_num] mul_n_0
+  | Comb (Const (name, _), m_tm) ->
+    begin
+      let i = index_of_name name in
+      if i = 0 then
+        let th = INST[m_tm, n_var_num; tm, t_var_num] mul_t_d0 in
+        TRANS th (AP_TERM d0_const (nmul1_left tm tm_index m_tm))
+      else
+        match m_tm with
+        | Const ("_0", _) ->
+          mul_array.(tm_index * maximum + i)
+        | _ ->
+          let th', add_flag = mul1_left_array.(tm_index * maximum + i) in
+          let th = INST[m_tm, m_var_num] th' in
+          if add_flag then
+            let ltm, rtm = dest_comb (rand (concl th)) in
+            let lplus, rarg = dest_comb rtm in
+            let th2 = AP_TERM lplus (nmul1_left tm tm_index m_tm) in
+            let th_add = uncurry nadd (dest_op (rand (concl th2))) in
+            TRANS th (AP_TERM ltm (TRANS th2 th_add))
+          else
+            let ltm = rator (rand (concl th)) in
+            let th2 = AP_TERM ltm (nmul1_left tm tm_index m_tm) in
+            TRANS th th2
+    end
+  | _ -> error "nmul1_left" [tm; arg] [];;
 
 (* Computes D_i(m) * D_j(n) *)
 let rec nmul larg rarg =
   match larg with
-    | Const ("_0", _) ->
-	INST[rarg, n_var_num] mul_0_n
-    | Comb (Const (name1, _) as ldtm, m_tm) ->
-	begin
-	  match rarg with
-	    | Const ("_0", _) ->
-		INST[larg, n_var_num] mul_n_0
-	    | Comb (Const (name2, _) as rdtm, n_tm) ->
-		let i1 = index_of_name name1 in
-		  if i1 = 0 then
-		    let th = INST[rarg, t_var_num; m_tm, n_var_num] mul_d0_t in
-		    let ltm = rator (rand (concl th)) in
-		      TRANS th (AP_TERM ltm (nmul m_tm rarg))
-		  else
-		    let i2 = index_of_name name2 in
-		      if i2 = 0 then
-			let th = INST[larg, t_var_num; n_tm, n_var_num] mul_t_d0 in
-			let ltm = rator (rand (concl th)) in
-			  TRANS th (AP_TERM ltm (nmul larg n_tm))
-		      else
-			(match n_tm with
-			   | Const ("_0", _) ->
-			       (match m_tm with
-				  | Const ("_0", _) ->
-				      mul_array.(i1 * maximum + i2)
-				  | _ -> nmul1_right larg rarg i2)
-			   | _ ->
-			       (match m_tm with
-				  | Const ("_0", _) ->
-				      nmul1_left larg i1 rarg
-				  | _ ->
-				      let th0 = INST[m_tm, m_var_num; n_tm, n_var_num]
-					gen_mul_array.(i1 * maximum + i2) in
-				      let d_low, expr = dest_comb (rand (concl th0)) in
-				      let ltm, rsum = dest_comb expr in
-				      let d_high, mul0 = dest_comb (rand ltm) in
-				      let th_mul0 = nmul m_tm n_tm in
-				      let th_mul1 = nmul1_right m_tm (mk_comb (rdtm, zero_const)) i2 in
-				      let th_mul2 = nmul1_right n_tm (mk_comb (ldtm, zero_const)) i1 in
-				      let th_larg = AP_TERM add_op_num (AP_TERM d_high th_mul0) in
-				      let th_rarg = MK_COMB (AP_TERM add_op_num th_mul1, th_mul2) in
-				      let add_rarg0 = uncurry nadd (dest_op (rand (concl th_rarg))) in
-				      let add_rarg = TRANS th_rarg add_rarg0 in
-				      let add_th = MK_COMB (th_larg, add_rarg) in
-				      let add0 = uncurry nadd (dest_op (rand (concl add_th))) in
-				      let add = TRANS add_th add0 in
-					TRANS th0 (AP_TERM d_low add)
-			       ))
-	    | _ -> error "nmul" [larg; rarg] []
-	end
-    | _ -> error "nmul" [larg; rarg] [];;
+  | Const ("_0", _) -> INST[rarg, n_var_num] mul_0_n
+  | Comb (Const (name1, _) as ldtm, m_tm) ->
+    begin
+      match rarg with
+      | Const ("_0", _) -> INST[larg, n_var_num] mul_n_0
+      | Comb (Const (name2, _) as rdtm, n_tm) ->
+        let i1 = index_of_name name1 in
+        if i1 = 0 then
+          let th = INST[rarg, t_var_num; m_tm, n_var_num] mul_d0_t in
+          let ltm = rator (rand (concl th)) in
+          TRANS th (AP_TERM ltm (nmul m_tm rarg))
+        else
+          let i2 = index_of_name name2 in
+          if i2 = 0 then
+            let th = INST[larg, t_var_num; n_tm, n_var_num] mul_t_d0 in
+            let ltm = rator (rand (concl th)) in
+            TRANS th (AP_TERM ltm (nmul larg n_tm))
+          else
+            (match n_tm with
+            | Const ("_0", _) ->
+              (match m_tm with
+              | Const ("_0", _) -> mul_array.(i1 * maximum + i2)
+              | _ -> nmul1_right larg rarg i2)
+            | _ ->
+              (match m_tm with
+              | Const ("_0", _) -> nmul1_left larg i1 rarg
+              | _ ->
+                let th0 = INST[m_tm, m_var_num; n_tm, n_var_num]
+                              gen_mul_array.(i1 * maximum + i2) in
+                let d_low, expr = dest_comb (rand (concl th0)) in
+                let ltm, rsum = dest_comb expr in
+                let d_high, mul0 = dest_comb (rand ltm) in
+                let th_mul0 = nmul m_tm n_tm in
+                let th_mul1 = nmul1_right m_tm (mk_comb (rdtm, zero_const)) i2 in
+                let th_mul2 = nmul1_right n_tm (mk_comb (ldtm, zero_const)) i1 in
+                let th_larg = AP_TERM add_op_num (AP_TERM d_high th_mul0) in
+                let th_rarg = MK_COMB (AP_TERM add_op_num th_mul1, th_mul2) in
+                let add_rarg0 = uncurry nadd (dest_op (rand (concl th_rarg))) in
+                let add_rarg = TRANS th_rarg add_rarg0 in
+                let add_th = MK_COMB (th_larg, add_rarg) in
+                let add0 = uncurry nadd (dest_op (rand (concl add_th))) in
+                let add = TRANS add_th add0 in
+                TRANS th0 (AP_TERM d_low add)
+              ))
+      | _ -> error "nmul" [larg; rarg] []
+    end
+  | _ -> error "nmul" [larg; rarg] [];;
 
 (* ------------------------------------------------------------------------- *)
 (* m DIV n: ndiv                                                             *)
 (* ------------------------------------------------------------------------- *)
 
 let ndiv =
-  let div_uniq = (UNDISCH_ALL o 
-		    PURE_ONCE_REWRITE_RULE[ARITH_RULE `a < b <=> (a < b:num <=> T)`] o 
-		    ONCE_REWRITE_RULE[ARITH_RULE `m = q * n + r <=> q * n + r = m:num`] o
-		    REWRITE_RULE[GSYM IMP_IMP] o SPEC_ALL) DIV_UNIQ in
+  let div_uniq = 
+    (UNDISCH_ALL o 
+      PURE_ONCE_REWRITE_RULE[ARITH_RULE `a < b <=> (a < b:num <=> T)`] o 
+      ONCE_REWRITE_RULE[ARITH_RULE `m = q * n + r <=> q * n + r = m:num`] o
+      REWRITE_RULE[GSYM IMP_IMP] o SPEC_ALL) DIV_UNIQ in
   let quo_mod a b =
     match a with
-      | Int m ->
-	  begin
-	    match b with
-	      | Int n -> Int (m / n), Int (m mod n)
-	      | Big_int n ->
-		  let q, r = Big_int.quomod_big_int (Big_int.big_int_of_int m) n in
-		    num_of_big_int q, num_of_big_int r
-	      | _ -> error_msg "ndiv: quo_mod: rational argument 2"
-	  end
-      | Big_int m ->
-	  begin
-	    match b with
-	      | Int n ->
-		  let q, r = Big_int.quomod_big_int m (Big_int.big_int_of_int n) in
-		    num_of_big_int q, num_of_big_int r
-	      | Big_int n ->
-		  let q, r = Big_int.quomod_big_int m n in
-		    num_of_big_int q, num_of_big_int r
-	      | _ -> error_msg "ndiv: quo_mod: rational argument 2"
-	  end
-      | _ -> error_msg "ndiv: quo_mod: rational argument 1" in
-    fun m_tm n_tm ->
-      let m = dest_nat m_tm in
-      let n = dest_nat n_tm in
-      let q, r = quo_mod m n in
-      let q_tm = mk_nat q and
-	  r_tm = mk_nat r in
-      let qn_th = nmul q_tm n_tm in
-      let qn_tm = rand (concl qn_th) in
-      let qnr_th = nadd qn_tm r_tm in
-      let th1 = TRANS (AP_THM (AP_TERM add_op_num qn_th) r_tm) qnr_th in
-      let th2, _ = nlt r_tm n_tm in
-      let th0 = INST[r_tm, r_var_num; n_tm, n_var_num; 
-		     m_tm, m_var_num; q_tm, q_var_num] div_uniq in
-	MY_PROVE_HYP th1 (MY_PROVE_HYP th2 th0);;
+    | Int m ->
+      begin
+        match b with
+        | Int n -> Int (m / n), Int (m mod n)
+        | Big_int n ->
+          let q, r = Big_int.quomod_big_int (Big_int.big_int_of_int m) n in
+          num_of_big_int q, num_of_big_int r
+        | _ -> error_msg "ndiv: quo_mod: rational argument 2"
+      end
+    | Big_int m ->
+      begin
+        match b with
+        | Int n ->
+          let q, r = Big_int.quomod_big_int m (Big_int.big_int_of_int n) in
+          num_of_big_int q, num_of_big_int r
+        | Big_int n ->
+          let q, r = Big_int.quomod_big_int m n in
+          num_of_big_int q, num_of_big_int r
+        | _ -> error_msg "ndiv: quo_mod: rational argument 2"
+      end
+    | _ -> error_msg "ndiv: quo_mod: rational argument 1" in
+  fun m_tm n_tm ->
+    let m = dest_nat m_tm in
+    let n = dest_nat n_tm in
+    let q, r = quo_mod m n in
+    let q_tm = mk_nat q and
+        r_tm = mk_nat r in
+    let qn_th = nmul q_tm n_tm in
+    let qn_tm = rand (concl qn_th) in
+    let qnr_th = nadd qn_tm r_tm in
+    let th1 = TRANS (AP_THM (AP_TERM add_op_num qn_th) r_tm) qnr_th in
+    let th2, _ = nlt r_tm n_tm in
+    let th0 = INST[r_tm, r_var_num; n_tm, n_var_num; 
+                   m_tm, m_var_num; q_tm, q_var_num] div_uniq in
+    MY_PROVE_HYP th1 (MY_PROVE_HYP th2 th0);;
 
 (* ------------------------------------------------------------------------- *)
 (* Cached arithmetic                                                         *)
@@ -1425,17 +1394,16 @@ let new_stat_data, stat_data =
     let data = { counter = 0; table_size = table_size } in
     let _ = stats := (name, data) :: !stats in
       data in
-    create_stat, (fun () -> !stats);;
+  create_stat, (fun () -> !stats);;
 
 let reset_stats () =
-  let _ = map (fun (_, data) -> data.counter <- 0) (stat_data()) in
-    ();;
+  List.iter (fun (_, data) -> data.counter <- 0) (stat_data());;
 
 let print_stats () =
   let pp (name, data) =
     sprintf "%s\t = %d\t (hash = %d)" name data.counter (data.table_size()) in
   let strs = map pp (stat_data()) in
-    print_string (String.concat "\n" strs);;
+  print_string (String.concat "\n" strs);;
 
 let le_table = Hashtbl.create !Arith_options.init_cache_size and
     lt_table = Hashtbl.create !Arith_options.init_cache_size and
@@ -1455,13 +1423,13 @@ let le_data = new_stat_data "le" (fun () -> Hashtbl.length le_table) and
 
 let reset_cache () =
   let clear = Hashtbl.clear in
-    clear le_table;
-    clear lt_table;
-    clear add_table;
-    clear sub_table;
-    clear sub_le_table;
-    clear mul_table;
-    clear div_table;;
+  clear le_table;
+  clear lt_table;
+  clear add_table;
+  clear sub_table;
+  clear sub_le_table;
+  clear mul_table;
+  clear div_table;;
 
 let add_to_cache t key v =
   if Hashtbl.length t >= !Arith_options.max_cache_size then Hashtbl.clear t;
@@ -1469,104 +1437,97 @@ let add_to_cache t key v =
 
 let rec nat_tm_hash tm =
   match tm with
-    | Const ("_0", _) -> ""
-    | Comb (Const (name, _), n_tm) ->
-	name ^ nat_tm_hash n_tm
-    | _ -> error "nat_tm_hash" [tm] [];;
+  | Const ("_0", _) -> ""
+  | Comb (Const (name, _), n_tm) ->
+    name ^ nat_tm_hash n_tm
+  | _ -> error "nat_tm_hash" [tm] [];;
 
 let nat_tm_hash2 tm1 tm2 =
   nat_tm_hash tm1 ^ "x" ^ nat_tm_hash tm2;;
 
 let nle ltm rtm =
-  let _ = le_data.counter <- le_data.counter + 1 in
-    if !Arith_options.cached then
-      let hash = nat_tm_hash2 ltm rtm in
-	try
-	  Hashtbl.find le_table hash
-	with Not_found ->
-	  let result = nle ltm rtm in
-	  let _ = add_to_cache le_table hash result in
-	    result
-    else
-      nle ltm rtm;;
+  le_data.counter <- le_data.counter + 1;
+  if !Arith_options.cached then
+    let hash = nat_tm_hash2 ltm rtm in
+    try Hashtbl.find le_table hash
+    with Not_found ->
+      let result = nle ltm rtm in
+      add_to_cache le_table hash result;
+      result
+  else
+    nle ltm rtm;;
 
 let nlt ltm rtm =
-  let _ = lt_data.counter <- lt_data.counter + 1 in
-    if !Arith_options.cached then
-      let hash = nat_tm_hash2 ltm rtm in
-	try
-	  Hashtbl.find lt_table hash
-	with Not_found ->
-	  let result = nlt ltm rtm in
-	  let _ = add_to_cache lt_table hash result in
-	    result
-    else
-      nlt ltm rtm;;
+  lt_data.counter <- lt_data.counter + 1;
+  if !Arith_options.cached then
+    let hash = nat_tm_hash2 ltm rtm in
+    try Hashtbl.find lt_table hash
+    with Not_found ->
+      let result = nlt ltm rtm in
+      add_to_cache lt_table hash result;
+      result
+  else
+    nlt ltm rtm;;
 
 let nadd ltm rtm =
-  let _ = add_data.counter <- add_data.counter + 1 in
-    if !Arith_options.cached then
-      let hash = nat_tm_hash2 ltm rtm in
-	try
-	  Hashtbl.find add_table hash
-	with Not_found ->
-	  let result = nadd ltm rtm in
-	  let _ = add_to_cache add_table hash result in
-	    result
-    else
-      nadd ltm rtm;;
+  add_data.counter <- add_data.counter + 1;
+  if !Arith_options.cached then
+    let hash = nat_tm_hash2 ltm rtm in
+    try Hashtbl.find add_table hash
+    with Not_found ->
+      let result = nadd ltm rtm in
+      add_to_cache add_table hash result;
+      result
+  else
+    nadd ltm rtm;;
 
 let nsub ltm rtm =
-  let _ = sub_data.counter <- sub_data.counter + 1 in
-    if !Arith_options.cached then
-      let hash = nat_tm_hash2 ltm rtm in
-	try
-	  Hashtbl.find sub_table hash
-	with Not_found ->
-	  let result = nsub ltm rtm in
-	  let _ = add_to_cache sub_table hash result in
-	    result
-    else
-      nsub ltm rtm;;
+  sub_data.counter <- sub_data.counter + 1;
+  if !Arith_options.cached then
+    let hash = nat_tm_hash2 ltm rtm in
+    try Hashtbl.find sub_table hash
+    with Not_found ->
+      let result = nsub ltm rtm in
+      add_to_cache sub_table hash result;
+      result
+  else
+    nsub ltm rtm;;
 
 let nsub_le ltm rtm =
-  let _ = sub_le_data.counter <- sub_le_data.counter + 1 in
-    if !Arith_options.cached then
-      let hash = nat_tm_hash2 ltm rtm in
-	try
-	  Hashtbl.find sub_le_table hash
-	with Not_found ->
-	  let result = nsub_le ltm rtm in
-	  let _ = add_to_cache sub_le_table hash result in
-	    result
-    else
-      nsub_le ltm rtm;;
+  sub_le_data.counter <- sub_le_data.counter + 1;
+  if !Arith_options.cached then
+    let hash = nat_tm_hash2 ltm rtm in
+    try Hashtbl.find sub_le_table hash
+    with Not_found ->
+      let result = nsub_le ltm rtm in
+      add_to_cache sub_le_table hash result;
+      result
+  else
+    nsub_le ltm rtm;;
 
 let nmul ltm rtm =
-  let _ = mul_data.counter <- mul_data.counter + 1 in
-    if !Arith_options.cached then
-      let hash = nat_tm_hash2 ltm rtm in
-	try
-	  Hashtbl.find mul_table hash
-	with Not_found ->
-	  let result = nmul ltm rtm in
-	  let _ = add_to_cache mul_table hash result in
-	    result
-    else
-      nmul ltm rtm;;
+  mul_data.counter <- mul_data.counter + 1;
+  if !Arith_options.cached then
+    let hash = nat_tm_hash2 ltm rtm in
+    try Hashtbl.find mul_table hash
+    with Not_found ->
+      let result = nmul ltm rtm in
+      add_to_cache mul_table hash result;
+      result
+  else
+    nmul ltm rtm;;
 
 let ndiv ltm rtm =
-  let _ = div_data.counter <- div_data.counter + 1 in
-    if !Arith_options.cached then
-      let hash = nat_tm_hash2 ltm rtm in
-	try
-	  Hashtbl.find div_table hash
-	with Not_found ->
-	  let result = ndiv ltm rtm in
-	  let _ = add_to_cache div_table hash result in
-	    result
-    else
-      ndiv ltm rtm;;
+  div_data.counter <- div_data.counter + 1;
+  if !Arith_options.cached then
+    let hash = nat_tm_hash2 ltm rtm in
+    try Hashtbl.find div_table hash
+    with Not_found ->
+      let result = ndiv ltm rtm in
+      add_to_cache div_table hash result;
+      result
+  else
+    ndiv ltm rtm;;
 
 end;;
 

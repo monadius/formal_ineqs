@@ -10,6 +10,8 @@
 (* Formal natural arithmetic with an arbitrary base                           *)
 (* -------------------------------------------------------------------------- *)
 
+(* TODO: apply "standardize" to all theorems *)
+
 module type Nat_arith_sig =
   sig
     val arith_base : int

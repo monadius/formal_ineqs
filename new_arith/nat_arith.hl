@@ -107,31 +107,31 @@ let def_array =
   let def i =
     let basic = mk_bit_definition i in
     let th1 = AP_THM basic n_var_num in
-      TRANS th1 (BETA (rand (concl th1))) in
+      standardize (TRANS th1 (BETA (rand (concl th1)))) in
   Array.init maximum def;;
 
 let const_array = 
-  Array.init maximum (fun i -> mk_const (name_array.(i),[]));;
+  Array.init maximum (fun i -> standardize_tm (mk_const (name_array.(i),[])));;
 
 let d0_const = const_array.(0) and
     d0_name = name_array.(0);;
 
 (* Alternative definition of D_i *)
-let zero_const_eq_zero = prove
+let zero_const_eq_zero = (standardize o prove)
   (`_0 = 0`, 
    REWRITE_TAC[NUMERAL]);;
 
 let zero_eq_zero_const = SYM zero_const_eq_zero;;
 
-let add_0_n = prove
+let add_0_n = (standardize o prove)
   (`_0 + n = n`, 
    ONCE_REWRITE_TAC[zero_const_eq_zero] THEN REWRITE_TAC[ADD_CLAUSES]);;
 
-let add_n_0 = prove
+let add_n_0 = (standardize o prove)
   (`n + _0 = n`, 
    ONCE_REWRITE_TAC[zero_const_eq_zero] THEN REWRITE_TAC[ADD_CLAUSES]);;
 
-let mul_n_0 = prove
+let mul_n_0 = (standardize o prove)
   (`n * _0 = 0`, 
    ONCE_REWRITE_TAC[zero_const_eq_zero] THEN REWRITE_TAC[MULT_CLAUSES; NUMERAL]);;
 
@@ -143,18 +143,18 @@ let def_thm i =
   let b0n = mk_comb(const_array.(0), n_var_num) in
   let rhs = mk_binop add_op_num bi0 b0n in
   prove(mk_eq(bin, rhs), 
-    REWRITE_TAC[def_array.(i); def_array.(0)] THEN
-    REWRITE_TAC[mul_n_0; ADD_CLAUSES] THEN ARITH_TAC);;
+    PURE_REWRITE_TAC[def_array.(i); def_array.(0)] THEN
+    PURE_REWRITE_TAC[mul_n_0; ADD_CLAUSES; ADD_AC] THEN REFL_TAC);;
 
-let def_thm_array = Array.init maximum def_thm;;
+let def_thm_array = Array.init maximum (standardize o def_thm);;
 
 (* |- D0 _0 = _0 *)
-let d0_0 = prove
+let d0_0 = (standardize o prove)
   (mk_eq(mk_comb(d0_const, zero_const), zero_const),
    REWRITE_TAC[def_array.(0); mul_n_0; ADD_CLAUSES; NUMERAL]);;
 
 (* |- D0 n = base * n *)
-let d0_explicit = prove
+let d0_explicit = (standardize o prove)
   (mk_eq(mk_comb(d0_const, n_var_num),mk_binop mul_op_num max_const n_var_num),
    REWRITE_TAC[def_array.(0); ADD_CLAUSES]);;
 
@@ -279,7 +279,7 @@ let REPLACE_NUMERALS = CONV_RULE (DEPTH_CONV TO_NAT_CONV);;
 (* --------------- *)
 
 (* |- SUC _0 = D1 _0 *)
-let suc_0 = prove
+let suc_0 = (standardize o prove)
   (mk_eq(`SUC _0`, mk_comb (const_array.(1), zero_const)),
    REWRITE_TAC[def_array.(1); mul_n_0; ARITH_SUC; NUMERAL; ARITH_ADD]);;
 
@@ -292,7 +292,7 @@ let suc_th i =
   let proof = REWRITE_TAC [def_array.(i); def_array.(suc)] THEN ARITH_TAC in
     prove(mk_eq (lhs, rhs), proof);;
 
-let suc_array = Array.init maximum suc_th;;
+let suc_array = Array.init maximum (standardize o suc_th);;
 
 let suc_max = suc_array.(maximum - 1);;
 
@@ -322,11 +322,11 @@ let rec nsuc tm =
 (* --------------- *)
 
 (* |- D0 n = 0 <=> n = 0 *)
-let eq_d0_0 = prove
+let eq_d0_0 = (standardize o prove)
   (mk_eq (mk_eq (mk_comb (d0_const, n_var_num), `0`), `n = 0`),
    REWRITE_TAC[def_array.(0); ADD_CLAUSES; MULT_EQ_0; ARITH_EQ]);;
 
-let eq_0_0 = prove
+let eq_0_0 = (standardize o prove)
   (`_0 = 0 <=> T`, 
    REWRITE_TAC[NUMERAL]);;
 
@@ -338,7 +338,7 @@ let eq_0_i =
     prove(concl, REWRITE_TAC[def_array.(i); eq_0_lemma; ARITH_EQ]);;
 
 let eq0_array = 
-  Array.init maximum (fun i -> if (i = 0) then eq_0_0 else eq_0_i i);;
+  Array.init maximum (fun i -> standardize (if (i = 0) then eq_0_0 else eq_0_i i));;
 
 (* --------------- *)
 (* Functions       *)
@@ -365,24 +365,24 @@ let rec neq0 tm =
 (* Theorems        *)
 (* --------------- *)
 
-let pre_0 = prove
+let pre_0 = (standardize o prove)
   (`PRE _0 = _0`, 
    MP_TAC (CONJUNCT1 PRE) THEN SIMP_TAC[NUMERAL]);;
 
 (* |- PRE (D1 _0) = _0 *)
-let pre_d1_0 = prove
+let pre_d1_0 = (standardize o prove)
   (mk_eq (mk_comb (`PRE`, mk_comb(const_array.(1), `_0`)), `_0`),
    REWRITE_TAC[def_array.(1); mul_n_0; ARITH_ADD; NUMERAL; ARITH_PRE; ARITH_EQ]);;
 
 (* n = 0 <=> T |- PRE (D0 n) = _0 *)
-let pre_d0_n0 = (UNDISCH_ALL o prove)
+let pre_d0_n0 = (UNDISCH_ALL o standardize o prove)
   (mk_imp (`n = 0 <=> T`, mk_eq (mk_comb (`PRE`, mk_comb (d0_const, `n:num`)), `_0`)),
    REWRITE_TAC[NUMERAL; d0_explicit] THEN 
      DISCH_THEN (fun th -> REWRITE_TAC[th; mul_n_0]) THEN
      REWRITE_TAC[NUMERAL; ARITH_PRE]);;
 
 (* n = 0 <=> F |- PRE (D0 n) = D{max} (PRE n) *)
-let pre_d0_n1 = (UNDISCH_ALL o prove)
+let pre_d0_n1 = (UNDISCH_ALL o standardize o prove)
   (mk_imp(`n = 0 <=> F`, 
     mk_eq (mk_comb (`PRE`, mk_comb(d0_const, `n:num`)),
     mk_comb (const_array.(maximum - 1), `PRE n`))),
@@ -400,7 +400,7 @@ let pre_th =
     MY_PROVE_HYP n0_th (EQ_MP th0 suc_th);;
 
 let pre_array = 
-  Array.init maximum (fun i -> if i = 0 then TRUTH else pre_th i);;
+  Array.init maximum (fun i -> standardize (if i = 0 then TRUTH else pre_th i));;
 
 let d1_pre_thm = pre_array.(1);;
 
@@ -443,21 +443,21 @@ let rec npre tm =
 (* Theorems        *)
 (* --------------- *)
 
-let even_const = `EVEN` and
-    odd_const = `ODD` and
-    eq_const = `<=>`;;
+let even_const = standardize_tm `EVEN` and
+    odd_const = standardize_tm `ODD` and
+    eq_const = standardize_tm `<=>`;;
 
-let even_zero = prove(`EVEN _0 <=> T`, REWRITE_TAC[ARITH_EVEN]) and
-    odd_zero = prove(`ODD _0 <=> F`, REWRITE_TAC[ARITH_ODD]);;
+let even_zero = (standardize o prove)(`EVEN _0 <=> T`, REWRITE_TAC[ARITH_EVEN]) and
+    odd_zero = (standardize o prove)(`ODD _0 <=> F`, REWRITE_TAC[ARITH_ODD]);;
 
 (* |- EVEN (D0 n) <=> T *)
-let even_d0 = prove
+let even_d0 = (standardize o prove)
   (mk_eq (mk_comb (`EVEN`, mk_comb (d0_const, `n:num`)), `T`),
    REWRITE_TAC[d0_explicit; EVEN_MULT] THEN
      DISJ1_TAC THEN CONV_TAC NUM_EVEN_CONV);;
 
 (* |- ODD (D0 n) <=> F *)
-let odd_d0 = prove
+let odd_d0 = (standardize o prove)
   (mk_eq (mk_comb (`ODD`, mk_comb (d0_const, `n:num`)), `F`),
    REWRITE_TAC[NOT_ODD; even_d0]);;
 
@@ -490,14 +490,14 @@ let next_odd_th =
 let even_array =
   let r = Array.init maximum (fun i -> even_d0, true) in
   for i = 1 to maximum - 1 do
-    r.(i) <- next_even_th (fst r.(i - 1)), i mod 2 = 0
+    r.(i) <- standardize (next_even_th (fst r.(i - 1))), i mod 2 = 0
   done;
   r;;
 
 let odd_array =
   let r = Array.init maximum (fun i -> odd_d0, false) in
   for i = 1 to maximum - 1 do
-    r.(i) <- next_odd_th (fst r.(i - 1)), i mod 2 = 1
+    r.(i) <- standardize (next_odd_th (fst r.(i - 1))), i mod 2 = 1
   done;
   r;;
 
@@ -529,10 +529,10 @@ let nodd tm =
 (* Theorems        *)
 (* --------------- *)
 
-let gt0_0 = prove(`0 < _0 <=> F`, REWRITE_TAC[ARITH_LT; NUMERAL]);;
+let gt0_0 = (standardize o prove)(`0 < _0 <=> F`, REWRITE_TAC[ARITH_LT; NUMERAL]);;
 
 (* |- 0 < D0 n <=> 0 < n *)
-let gt0_d0 = prove
+let gt0_d0 = (standardize o prove)
   (mk_eq (mk_binop lt_op_num `0` (mk_comb(d0_const, n_var_num)), `0 < n`),
    REWRITE_TAC[def_array.(0)] THEN ARITH_TAC);;
 
@@ -543,7 +543,7 @@ let gt0_th i =
     prove(concl, proof);;
 
 let gt0_array = 
-  Array.init maximum (fun i -> if i = 0 then gt0_d0 else gt0_th i);;
+  Array.init maximum (fun i -> standardize (if i = 0 then gt0_d0 else gt0_th i));;
 
 (* --------------- *)
 (* Functions       *)
@@ -570,11 +570,11 @@ let rec ngt0 tm =
 (* Theorems        *)
 (* --------------- *)
 
-let eq_0_left = prove
+let eq_0_left = (standardize o prove)
   (`n = _0 <=> n = 0`,
    REWRITE_TAC[NUMERAL]);;
 
-let eq_0_right = prove
+let eq_0_right = (standardize o prove)
   (`_0 = n <=> n = 0`,
    REWRITE_TAC[NUMERAL; EQ_SYM_EQ]);;
 
@@ -601,12 +601,12 @@ let gen_di_eq_dj =
     let dj_n = mk_comb (const_array.(j), n_var_num) in
     let eq_tm = mk_binop eq_op_num di_m dj_n in
     if i = j then
-      prove (mk_eq (eq_tm, mk_binop eq_op_num m_var_num n_var_num), 
-      REWRITE_TAC[def_array.(i)] THEN ARITH_TAC)
+      (standardize o prove)(mk_eq (eq_tm, mk_binop eq_op_num m_var_num n_var_num), 
+        REWRITE_TAC[def_array.(i)] THEN ARITH_TAC)
     else
-      prove (mk_eq (eq_tm, f_const), 
-      REWRITE_TAC[def_array.(i); def_array.(j)] THEN
-      MATCH_MP_TAC aux_th THEN CONV_TAC NUM_REDUCE_CONV);;
+      (standardize o prove)(mk_eq (eq_tm, f_const), 
+        REWRITE_TAC[def_array.(i); def_array.(j)] THEN
+        MATCH_MP_TAC aux_th THEN CONV_TAC NUM_REDUCE_CONV);;
 
 let gen_next_eq_thm =
   let suc_eq_th = ARITH_RULE `SUC m = SUC n <=> m = n` in
@@ -617,7 +617,7 @@ let gen_next_eq_thm =
     let suc_m = nsuc m_tm in
     let suc_n = nsuc n_tm in
     let th1 = SYM (MK_COMB ((AP_TERM eq_op_num suc_m), suc_n)) in
-    TRANS (TRANS th1 th0) th;;
+    standardize (TRANS (TRANS th1 th0) th);;
 
 let eq_array =
   let eqs = Array.init (maximum * maximum) (fun _ -> TRUTH) in
@@ -676,11 +676,11 @@ let rec neq ltm rtm =
 (* Theorems        *)
 (* --------------- *)
 
-let lt_n_0 = prove
+let lt_n_0 = (standardize o prove)
   (`n < _0 <=> F`, 
    PURE_ONCE_REWRITE_TAC[zero_const_eq_zero] THEN ARITH_TAC);;
 
-let le_0_n = prove
+let le_0_n = (standardize o prove)
   (`_0 <= n <=> T`,
    PURE_ONCE_REWRITE_TAC[zero_const_eq_zero] THEN ARITH_TAC);;
 
@@ -696,7 +696,7 @@ let gen_0_lt_di i =
       (mk_eq (lt_tm, `0 < n`), REWRITE_TAC[d0_explicit] THEN ARITH_TAC);;
 
 let lt0_array =
-  Array.init maximum gen_0_lt_di;;
+  Array.init maximum (standardize o gen_0_lt_di);;
 
 (* Generates the theorem |- D_i(m) < D_j(n) <=> m <= n (or m < n) *)
 let gen_di_lt_dj i j =
@@ -708,7 +708,7 @@ let gen_di_lt_dj i j =
       mk_binop lt_op_num m_var_num n_var_num 
     else
       mk_binop le_op_num m_var_num n_var_num in
-  prove(mk_eq(lt_tm, rhs), 
+  (standardize o prove)(mk_eq(lt_tm, rhs), 
     REWRITE_TAC[def_array.(i); def_array.(j)] THEN ARITH_TAC);;
 
 (* Given a theorem |- D_i(m) < D_j(n) <=> P m n,                        *)
@@ -722,7 +722,7 @@ let gen_next_lt_thm =
     let suc_m = nsuc m_tm in
     let suc_n = nsuc n_tm in
     let th1 = SYM (MK_COMB ((AP_TERM lt_op_num suc_m), suc_n)) in
-    TRANS (TRANS th1 th0) th;;
+    standardize (TRANS (TRANS th1 th0) th);;
 
 let lt_array =
   let r = Array.init (maximum * maximum) (fun i -> TRUTH) in
@@ -760,7 +760,7 @@ let gen_di_le_0 i =
       (mk_eq(lt_tm, `n <= 0`), REWRITE_TAC[d0_explicit] THEN ARITH_TAC);;
 
 let le0_array = 
-  Array.init maximum gen_di_le_0;;
+  Array.init maximum (standardize o gen_di_le_0);;
 
 (* Generates the theorem |- D_i(m) <= D_j(n) <=> m <= n (or m < n) *)
 let gen_di_le_dj i j =
@@ -772,7 +772,7 @@ let gen_di_le_dj i j =
       mk_binop lt_op_num m_var_num n_var_num 
     else
       mk_binop le_op_num m_var_num n_var_num in
-  prove(mk_eq(lt_tm, rhs), 
+  (standardize o prove)(mk_eq(lt_tm, rhs), 
     REWRITE_TAC[def_array.(i); def_array.(j)] THEN ARITH_TAC);;
 
 (* Given a theorem |- D_i(m) <= D_j(n) <=> P m n,               *)
@@ -786,7 +786,7 @@ let gen_next_le_thm =
     let suc_m = nsuc m_tm in
     let suc_n = nsuc n_tm in
     let th1 = SYM (MK_COMB ((AP_TERM le_op_num suc_m), suc_n)) in
-    TRANS (TRANS th1 th0) th;;
+    standardize (TRANS (TRANS th1 th0) th);;
 
 let le_array =
   let r = Array.init (maximum * maximum) (fun i -> TRUTH) in
@@ -880,11 +880,11 @@ and nle ltm rtm =
 (* Theorems        *)
 (* --------------- *)
 
-let max_case1 = (UNDISCH_ALL o ARITH_RULE) `(m <= n <=> T) ==> MAX m n = n`;;
-let max_case2 = (UNDISCH_ALL o ARITH_RULE) `(m <= n <=> F) ==> MAX m n = m`;;
+let max_case1 = (UNDISCH_ALL o standardize o ARITH_RULE) `(m <= n <=> T) ==> MAX m n = n`;;
+let max_case2 = (UNDISCH_ALL o standardize o ARITH_RULE) `(m <= n <=> F) ==> MAX m n = m`;;
 
-let min_case1 = (UNDISCH_ALL o ARITH_RULE) `(m <= n <=> T) ==> MIN m n = m`;;
-let min_case2 = (UNDISCH_ALL o ARITH_RULE) `(m <= n <=> F) ==> MIN m n = n`;;
+let min_case1 = (UNDISCH_ALL o standardize o ARITH_RULE) `(m <= n <=> T) ==> MIN m n = m`;;
+let min_case2 = (UNDISCH_ALL o standardize o ARITH_RULE) `(m <= n <=> F) ==> MIN m n = n`;;
 
 (* --------------- *)
 (* Functions       *)
@@ -916,8 +916,8 @@ let nmin ltm rtm =
 (* Theorems        *)
 (* --------------- *)
 
-let cadd_0_n = prove(`SUC (_0 + n) = SUC n`, REWRITE_TAC[add_0_n]);;
-let cadd_n_0 = prove(`SUC (n + _0) = SUC n`, REWRITE_TAC[add_n_0]);;
+let cadd_0_n = (standardize o prove)(`SUC (_0 + n) = SUC n`, REWRITE_TAC[add_0_n]);;
+let cadd_n_0 = (standardize o prove)(`SUC (n + _0) = SUC n`, REWRITE_TAC[add_n_0]);;
 
 let th_add_right_next =
   let suc_add_right = ARITH_RULE `SUC(m + n) = m + SUC n` in
@@ -933,12 +933,12 @@ let th_add_right_next =
     let name = fst (dest_const (rator rarg)) in
     let th2 = suc_array.(index_of_name name) in
     let th_lhs = TRANS th1 (AP_TERM ltm th2) in
-    TRANS (TRANS (SYM th_lhs) suc_th) th_rhs;;
+    standardize (TRANS (TRANS (SYM th_lhs) suc_th) th_rhs);;
 
 let add_array =
   let r = Array.init (maximum * maximum) (fun i -> TRUTH, false) in
   (* |- D0 m + D0 n = D0 (m + n) *)
-  let d0_add = prove
+  let d0_add = (standardize o prove)
     (mk_eq (mk_binop add_op_num (mk_comb (d0_const, m_var_num)) (mk_comb (d0_const, n_var_num)),
             mk_comb (d0_const, mk_binop add_op_num m_var_num n_var_num)),
      REWRITE_TAC[d0_explicit] THEN ARITH_TAC) in
@@ -948,7 +948,7 @@ let add_array =
       else
         INST[n_var_num, m_var_num; m_var_num, n_var_num]
             (ONCE_REWRITE_RULE[ADD_AC] (fst r.(i))) in
-    r.(i * maximum) <- (th0, false);
+    r.(i * maximum) <- (standardize th0, false);
     for j = 1 to maximum - 1 do
       let th, _ = r.(i * maximum + j - 1) in
       r.(i * maximum + j) <- (th_add_right_next th, i + j >= maximum)
@@ -964,7 +964,7 @@ let th_cadd i j =
   let ltm, rtm = dest_comb rtm in
   let name = fst (dest_const ltm) in
   let suc_th = INST[rtm, n_var_num] suc_array.(index_of_name name) in
-  TRANS th0 suc_th;;
+  standardize (TRANS th0 suc_th);;
 
 let cadd_array =
   let r = Array.init (maximum * maximum) (fun i -> TRUTH, false) in
@@ -1033,9 +1033,9 @@ and nadc ltm rtm =
 (* Theorems        *)
 (* --------------- *)
 
-let sub_lemma1 = (UNDISCH_ALL o ARITH_RULE) `n + t = m ==> m - n = t:num`;;
-let sub_lemma2 = (UNDISCH_ALL o REWRITE_RULE[NUMERAL] o ARITH_RULE) `m + t = n ==> m - n = 0`;;
-let le_lemma = (UNDISCH_ALL o ARITH_RULE) `n + t = m ==> n <= m:num`;;
+let sub_lemma1 = (UNDISCH_ALL o standardize o ARITH_RULE) `n + t = m ==> m - n = t:num`;;
+let sub_lemma2 = (UNDISCH_ALL o standardize o REWRITE_RULE[NUMERAL] o ARITH_RULE) `m + t = n ==> m - n = 0`;;
+let le_lemma = (UNDISCH_ALL o standardize o ARITH_RULE) `n + t = m ==> n <= m:num`;;
 
 (* --------------- *)
 (* Functions       *)
@@ -1084,27 +1084,27 @@ let nsub_le tm1 tm2 =
 (* Theorems        *)
 (* --------------- *)
 
-let mul_0_n = prove
+let mul_0_n = (standardize o prove)
   (`_0 * n = _0`, 
    ONCE_REWRITE_TAC[zero_const_eq_zero] THEN REWRITE_TAC[MULT]);;
 
-let mul_n_0 = ONCE_REWRITE_RULE[MULT_AC] mul_0_n;;
+let mul_n_0 = (standardize o ONCE_REWRITE_RULE[MULT_AC]) mul_0_n;;
 
 (* |- D1 _0 * n = n, |- n * D1 _0 = n *)
 let mul_1_n, mul_n_1 =
   let one_const = mk_comb (const_array.(1), zero_num) in
   let cond = mk_eq (mk_binop mul_op_num one_const n_var_num, n_var_num) in
   let th = (REWRITE_RULE[NUMERAL] o prove)(cond, REWRITE_TAC[def_array.(1)] THEN ARITH_TAC) in
-  th, ONCE_REWRITE_RULE[MULT_AC] th;;
+  standardize th, (standardize o ONCE_REWRITE_RULE[MULT_AC]) th;;
 
 (* |- D0 n * t = D0 (n * t) *)
-let mul_d0_t = prove
+let mul_d0_t = (standardize o prove)
   (mk_eq (mk_binop mul_op_num (mk_comb (d0_const, n_var_num)) t_var_num,
           mk_comb(d0_const, mk_binop mul_op_num n_var_num t_var_num)),
    REWRITE_TAC[def_array.(0)] THEN ARITH_TAC);;
 
 (* |- t * D0 n = D0 (t * n) *)
-let mul_t_d0 = ONCE_REWRITE_RULE[MULT_AC] mul_d0_t;;
+let mul_t_d0 = (standardize o ONCE_REWRITE_RULE[MULT_AC]) mul_d0_t;;
 
 (* Multiplication table *)
 let mul_th_next_right =
@@ -1120,13 +1120,13 @@ let mul_th_next_right =
     let cn = fst (dest_const (rator rtm)) in
     let th_suc = INST[zero_const, n_var_num] suc_array.(index_of_name cn) in
     let th3 = AP_TERM (mk_comb (mul_op_num, m_tm)) th_suc in
-    TRANS (SYM th3) th2;;
+    standardize (TRANS (SYM th3) th2);;
 
 let mul_array = 
   let r = Array.init (maximum * maximum) (fun i -> TRUTH) in
   for i = 1 to maximum - 1 do
     let th1 = INST[mk_comb (const_array.(i), zero_const), n_var_num] mul_n_1 in
-    r.(i * maximum + 1) <- th1;
+    r.(i * maximum + 1) <- standardize th1;
     for j = 2 to maximum - 1 do
       r.(i * maximum + j) <- mul_th_next_right r.(i * maximum + j - 1)
     done
@@ -1145,7 +1145,7 @@ let prod_lemma =
                  mk_comb (d0_const, add (mk_comb (d0_const, mul (m_var_num, n_var_num)),
                                          add (mul (m_var_num, r_var_num),
                                               mul (n_var_num, t_var_num))))) in
-  prove(mk_eq(lhs, rhs),
+  (standardize o prove)(mk_eq(lhs, rhs),
         REWRITE_TAC[LEFT_ADD_DISTRIB; RIGHT_ADD_DISTRIB] THEN
           REWRITE_TAC[mul_d0_t; mul_t_d0] THEN
           ONCE_REWRITE_TAC[GSYM ADD_ASSOC] THEN
@@ -1200,7 +1200,7 @@ let gen_mul_array =
   let r = Array.init (maximum * maximum) (fun i -> TRUTH) in
   for i = 1 to maximum - 1 do
     for j = 1 to maximum - 1 do
-      r.(i * maximum + j) <- gen_mul_thm i j
+      r.(i * maximum + j) <- standardize (gen_mul_thm i j)
     done
   done;
   r;;
@@ -1220,11 +1220,11 @@ let mul1_right_th i j =
     let tm1_th = TRANS (AP_TERM ltm (INST[m_var_num, n_var_num] mul_n_0)) d0_0 in
     let tm123_th' = TRANS (INST[tm23, n_var_num] add_0_n) tm23_th in
     let tm123_th = TRANS (AP_THM (AP_TERM add_op_num tm1_th) tm23) tm123_th' in
-    TRANS th0 (AP_TERM b_low tm123_th)
+    standardize (TRANS th0 (AP_TERM b_low tm123_th))
   else
     let tm1_th = AP_TERM ltm (INST[m_var_num, n_var_num] mul_n_0) in
     let tm123_th = MK_COMB(AP_TERM add_op_num tm1_th, tm23_th) in
-    TRANS th0 (AP_TERM b_low tm123_th);;
+    standardize (TRANS th0 (AP_TERM b_low tm123_th));;
 
 (* |- D_j(0) * D_i(m) = D_p(D_q(0) + D_j(0) * D_i(m) *)
 let mul1_left_th =
@@ -1239,10 +1239,10 @@ let mul1_left_th =
       let ltm, rtm = dest_op rarg in
       let th_rhs' = INST[ltm, m_var_num; rtm, n_var_num] MULT_AC' in
       let th_rhs = AP_TERM (mk_comb(add_op_num, larg)) th_rhs' in
-      TRANS th_lhs (TRANS th (AP_TERM btm th_rhs))
+      standardize (TRANS th_lhs (TRANS th (AP_TERM btm th_rhs)))
     else
       let th_rhs = INST[larg, m_var_num; rarg, n_var_num] MULT_AC' in
-      TRANS th_lhs (TRANS th (AP_TERM btm th_rhs));;
+      standardize (TRANS th_lhs (TRANS th (AP_TERM btm th_rhs)));;
 
 let mul1_right_array, mul1_left_array =
   let right = Array.init (maximum * maximum) (fun i -> TRUTH, false) and
@@ -1378,7 +1378,7 @@ let rec nmul larg rarg =
 
 let ndiv =
   let div_uniq = 
-    (UNDISCH_ALL o 
+    (UNDISCH_ALL o standardize o
       PURE_ONCE_REWRITE_RULE[ARITH_RULE `a < b <=> (a < b:num <=> T)`] o 
       ONCE_REWRITE_RULE[ARITH_RULE `m = q * n + r <=> q * n + r = m:num`] o
       REWRITE_RULE[GSYM IMP_IMP] o SPEC_ALL) DIV_UNIQ in

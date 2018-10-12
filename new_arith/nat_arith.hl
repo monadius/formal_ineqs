@@ -32,6 +32,7 @@ module type Nat_arith_sig =
       (* Returns the number of digits in a numeral (including all zero digits) *)
     val size_nat : term -> int
     val print_nat : formatter -> term -> unit
+    val parse_nat : lexcode list -> preterm * lexcode list
 
     val TO_NAT_CONV : term -> thm
     val replace_numerals : term -> term
@@ -228,6 +229,40 @@ let print_nat fmt tm =
     let str = "'" ^ Num.string_of_num n in
       Format.pp_print_string fmt str
   with _ -> failwith "print_nat";;
+
+let pmk_nat =
+  let num_pty = Ptycon ("num", []) in
+  let max_bi = Big_int.big_int_of_int maximum in
+  let quo_mod a =
+    match a with
+    | Int n -> Int (n / maximum), n mod maximum
+    | Big_int n ->
+      let q, r = Big_int.quomod_big_int n max_bi in
+      num_of_big_int q, Big_int.int_of_big_int r
+    | _ -> error_fmt "pmk_nat: rational argument: %s" (string_of_num a) in
+  let rec pmk n =
+    if n =/ num_0 then Varp ("_0", num_pty)
+    else
+      let q, r = quo_mod n in
+      let digit = Varp (name_array.(r), Ptycon ("fun", [num_pty; num_pty])) in
+        Combp (digit, pmk q) in
+  fun n ->
+    if sign_num n < 0 then 
+      error_fmt "pmk_nat: negative argument: %s" (string_of_num n)
+    else
+      pmk n;;
+
+(* Note: install_parser ("nat", parse_nat) does not work for terms `'123`
+   because parser.ml:parse_preterm does not call user parsers for one-element
+   lexcode lists *)
+let parse_nat ls =
+  match ls with
+  | Ident s :: rest when s <> "" && s.[0] = '\'' ->
+    (try
+      let n = num_of_string (String.sub s 1 (String.length s - 1)) in
+      pmk_nat n, rest
+    with Failure _ -> raise Noparse)
+  | _ -> raise Noparse;;
 
 (* ------------------------------------------------------------------------- *)
 (* TO_NAT_CONV: converts HOL numerals to our numerals                        *)

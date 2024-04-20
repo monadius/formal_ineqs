@@ -54,7 +54,7 @@ let ineq = define
 
 (* A modified (only one case is considered, x > 0) definition of atn2 *)
 (* Add ' to some definitions to avoid conflicts with original Flyspeck definitions *)
-let atn2' = new_definition `atn2'(x,y) = atn(y / x)`
+let atn2' = new_definition `atn2'(x,y) = atn(y / x)`;;
 
 
 (* delta_x *)
@@ -331,6 +331,6 @@ let test_easy, test_medium, test_hard =
   (fun () -> run (get_keys Hard));;
 
 
-(* let easy = test_easy();; *)
+let easy = test_easy();;
 (* let medium = test_medium();; *)
 (* let hard = test_hard();; *)

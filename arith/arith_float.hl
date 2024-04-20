@@ -2215,9 +2215,10 @@ let even_const = `EVEN` and
     f1_var_num = `f1:num` and
     p_var_num = `p:num`;;
 
+open Big_int;;
+
 (* Returns the list of digits of the given Big_int n in the base b *)
 let rec get_big_int_digits b n =
-  let open Big_int in
   let bb = big_int_of_int b in
   if le_big_int n zero_big_int then []
   else
@@ -2226,7 +2227,6 @@ let rec get_big_int_digits b n =
 
 (* [1;2;3] -> 123 (base = 10) *)
 let rec big_int_from_list b list =
-  let open Big_int in
   let rec proc acc list =
     match list with
 	[] -> acc
@@ -2242,7 +2242,6 @@ let rec take n list =
 (* Returns an integer number that contains at most pp significant digits
    in the given base b *)
 let big_int_round_lo base pp n =
-  let open Big_int in
   let digits = rev (get_big_int_digits base n) in
   let n_digits = length digits in
     if n_digits <= pp then
@@ -2252,7 +2251,6 @@ let big_int_round_lo base pp n =
 	mult_big_int (power_int_positive_int base (n_digits - pp)) m;;
 
 let big_int_round_hi base pp n =
-  let open Big_int in
   let digits = rev (get_big_int_digits base n) in
   let n_digits = length digits in
     if n_digits <= pp then n
@@ -2266,7 +2264,6 @@ let big_int_round_hi base pp n =
 	
 (******************)
 let rec float_sqrt_lo pp tm =
-  let open Big_int in
   let s, m_tm, e_tm = dest_float tm in
   let p_tm = rand (mk_small_numeral_array pp) in
     if s <> "F" then
@@ -2331,7 +2328,6 @@ let rec float_sqrt_lo pp tm =
 
 
 let rec float_sqrt_hi pp tm =
-  let open Big_int in
   let s, m_tm, e_tm = dest_float tm in
   let p_tm = rand (mk_small_numeral_array pp) in
     if s <> "F" then

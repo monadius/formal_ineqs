@@ -1,0 +1,2410 @@
+(* ========================================================================== *)
+(*      Formal verification of nonlinear inequalities in HOL Light            *)
+(*                                                                            *)
+(*      Fast multi-base natural number arithmetic (Fast_num)                  *)
+(* ========================================================================== *)
+
+(* -------------------------------------------------------------------------- *)
+(* Formal natural arithmetic with an arbitrary even base                      *)
+(* Combines and extends the best ideas from nat_arith.hl and arith_num3.hl:   *)
+(*  - Full term/theorem standardization (pointer sharing for fast aconv)      *)
+(*  - Direct pattern matching on term constructors (zero tuple allocations)   *)
+(*  - _0-specialized terminal theorem tables for all unary/binary operations  *)
+(*  - Pre-extracted digit constant arrays to avoid runtime term inspection    *)
+(*  - Chunked 64-bit native int <-> Big_int conversions (mk_nat / dest_nat)   *)
+(*  - Direct OCaml digit-spine subtraction with tail sharing (zero Big_int)   *)
+(*  - Comparison-based underflow fast path for subtraction (m < n => m-n = 0) *)
+(*  - Optimized multiplication:                                               *)
+(*      * trailing-zero stripping & shorter-operand ordering                  *)
+(*      * O(n^2/2) dedicated squaring (nsqr) when operands are identical      *)
+(*      * single-addition fast paths for j = 2, base/2, base-1                *)
+(*      * per-call ascending digit cache with sum & complement reuse          *)
+(*      * specialized single-digit and D0-shifted addition helpers            *)
+(*      * O(n^1.585) Karatsuba multiplication for large operands              *)
+(*  - Native 64-bit int division fast path & special cases in ndiv            *)
+(* -------------------------------------------------------------------------- *)
+
+module type Fast_num_sig =
+  sig
+    val arith_base : int
+    val base_const : thm
+    val name_array : string array
+    val const_array : term array
+    (* |- F_i(n) = base * n + i *)
+    val def_array : thm array
+    (* |- F_i(n) = F_i(_0) + F0(n) *)
+    val def_thm_array : thm array
+    (* F6 -> 6, F30 -> 30 *)
+    val index_of_name : string -> int
+    val index_of_name2 : string -> string -> int
+
+    val mk_nat : num -> term
+    val mk_small_nat : int -> term
+    val dest_nat : term -> num
+    (* Returns the number of digits in a numeral (including all zero digits) *)
+    val size_nat : term -> int
+    val print_nat : formatter -> term -> unit
+    val parse_nat : lexcode list -> preterm * lexcode list
+
+    val TO_NAT_CONV : term -> thm
+    val FROM_NAT_CONV : term -> thm
+    val replace_numerals : term -> term
+    val REPLACE_NUMERALS : thm -> thm
+
+    val nsuc : term -> thm
+    val npre : term -> thm
+
+    val neven : term -> thm * bool
+    val nodd : term -> thm * bool
+    val neq0 : term -> thm * bool
+    val ngt0 : term -> thm * bool
+    val neq : term -> term -> thm * bool
+    val nlt : term -> term -> thm * bool
+    val nle : term -> term -> thm * bool
+
+    val nmax : term -> term -> thm
+    val nmin : term -> term -> thm
+
+    val nadd : term -> term -> thm
+    val nsub : term -> term -> thm
+    val nsub_le : term -> term -> thm * thm * bool
+    val nmul : term -> term -> thm
+    val nsqr : term -> thm
+    val ndiv : term -> term -> thm
+
+    val karatsuba_threshold : int ref
+
+    val print_stats : unit -> unit
+    val reset_stats : unit -> unit
+    val reset_cache : unit -> unit
+    val nat_tm_hash : term -> string
+  end;;
+
+(* Dependencies *)
+needs "misc/misc_functions.hl";;
+needs "misc/misc_vars.hl";;
+needs "arith_options.hl";;
+
+module Fast_num : Fast_num_sig = struct
+
+open Num;;
+open Misc_functions;;
+open Misc_vars;;
+
+let arith_base = !Arith_options.base;;
+let maximum = arith_base;;
+
+let _ =
+  if maximum < 2 then
+    failwith "Fast_num: arith_base must be >= 2";;
+
+(* ------------------------------------------------------------------------- *)
+(* Definitions and constants                                                 *)
+(* ------------------------------------------------------------------------- *)
+
+let fnum_type = `:num->num` and
+    max_const = standardize_tm (mk_small_numeral maximum);;
+
+(* |- fast_base_const = {arith_base} *)
+let base_const =
+  let eq = mk_eq (`fast_base_const : num`, mk_small_numeral arith_base) in
+    standardize (new_basic_definition eq);;
+
+(* Names of constants which define "digits" *)
+let name_array = Array.init maximum (fun i -> "F" ^ string_of_int i);;
+
+(* Fast extraction of integer digit index from constant name (e.g., "F6" -> 6) *)
+let index_of_name s =
+  let len = String.length s in
+  if len = 2 then
+    Char.code (String.unsafe_get s 1) - 48
+  else if len = 3 then
+    (Char.code (String.unsafe_get s 1) - 48) * 10 +
+    (Char.code (String.unsafe_get s 2) - 48)
+  else if len = 4 then
+    (Char.code (String.unsafe_get s 1) - 48) * 100 +
+    (Char.code (String.unsafe_get s 2) - 48) * 10 +
+    (Char.code (String.unsafe_get s 3) - 48)
+  else
+    int_of_string (String.sub s 1 (len - 1));;
+
+let index_of_name2 name1 name2 =
+  index_of_name name1 * maximum + index_of_name name2;;
+
+(* |- F_i = \n. base * n + i *)
+let mk_bit_definition i =
+  let lhs = mk_var (name_array.(i), fnum_type) in
+  let tm1 = mk_binop mul_op_num max_const n_var_num in
+  let tm2 = mk_binop add_op_num tm1 (mk_small_numeral i) in
+  let rhs = mk_abs (n_var_num, tm2) in
+    new_basic_definition (mk_eq (lhs, rhs));;
+
+(* |- F_i n = base * n + i *)
+let def_array =
+  let def i =
+    let basic = mk_bit_definition i in
+    let th1 = AP_THM basic n_var_num in
+      standardize (TRANS th1 (BETA (rand (concl th1)))) in
+  Array.init maximum def;;
+
+let const_array =
+  Array.init maximum (fun i -> standardize_tm (mk_const (name_array.(i), [])));;
+
+let dj0_array =
+  Array.init maximum (fun i -> standardize_tm (mk_comb (const_array.(i), zero_const)));;
+
+let d0_const = const_array.(0) and
+    d0_name = name_array.(0) and
+    dmax_const = const_array.(maximum - 1);;
+
+(* Fundamental zero / base identities *)
+let zero_const_eq_zero = (standardize o prove)
+  (`_0 = 0`,
+   REWRITE_TAC[NUMERAL]);;
+
+let zero_eq_zero_const = standardize (SYM zero_const_eq_zero);;
+
+let add_0_n = (standardize o prove)
+  (`_0 + n = n`,
+   ONCE_REWRITE_TAC[zero_const_eq_zero] THEN REWRITE_TAC[ADD_CLAUSES]);;
+
+let add_n_0 = (standardize o prove)
+  (`n + _0 = n`,
+   ONCE_REWRITE_TAC[zero_const_eq_zero] THEN REWRITE_TAC[ADD_CLAUSES]);;
+
+let add_m_0 = standardize (INST [m_var_num, n_var_num] add_n_0);;
+
+let mul_n_0_z = (standardize o prove)
+  (`n * _0 = 0`,
+   SUBGOAL_THEN `_0 = 0`
+     (fun th -> ONCE_REWRITE_TAC[th] THEN REWRITE_TAC[MULT_CLAUSES]) THEN
+   REWRITE_TAC[NUMERAL]);;
+
+(* |- F_i(n) = F_i(_0) + F0(n) *)
+let def_thm i =
+  let bin = mk_comb (const_array.(i), n_var_num) in
+  let bi0 = dj0_array.(i) in
+  let b0n = mk_comb (d0_const, n_var_num) in
+  let rhs = mk_binop add_op_num bi0 b0n in
+  prove (mk_eq (bin, rhs),
+    PURE_REWRITE_TAC[def_array.(i); def_array.(0)] THEN
+    PURE_REWRITE_TAC[mul_n_0_z; ADD_CLAUSES; ADD_AC] THEN REFL_TAC);;
+
+let def_thm_array = Array.init maximum (standardize o def_thm);;
+
+(* |- F0 _0 = _0 *)
+let d0_0 = (standardize o prove)
+  (mk_eq (dj0_array.(0), zero_const),
+   REWRITE_TAC[def_array.(0); mul_n_0_z; ADD_CLAUSES; NUMERAL]);;
+
+(* |- F0 n = base * n *)
+let d0_explicit = (standardize o prove)
+  (mk_eq (mk_comb (d0_const, n_var_num), mk_binop mul_op_num max_const n_var_num),
+   REWRITE_TAC[def_array.(0); ADD_CLAUSES]);;
+
+(* ------------------------------------------------------------------------- *)
+(* Fast chunked mk_nat, mk_small_nat, dest_nat, size_nat                     *)
+(* ------------------------------------------------------------------------- *)
+
+(* Largest chunk_k such that maximum^chunk_k fits in OCaml native int *)
+let chunk_k, chunk_base =
+  let limit = max_int / maximum in
+  let rec loop k p =
+    if p <= limit then loop (k + 1) (p * maximum) else k, p in
+  loop 1 maximum;;
+
+let chunk_big = Big_int.big_int_of_int chunk_base;;
+let zero_big = Big_int.zero_big_int;;
+
+let rec mk_small_nat_raw n =
+  if n = 0 then zero_const
+  else if n < maximum then dj0_array.(n)
+  else mk_comb (const_array.(n mod maximum), mk_small_nat_raw (n / maximum));;
+
+let mk_small_nat n =
+  if n < 0 then
+    error_fmt "mk_small_nat: negative argument: %d" n
+  else
+    mk_small_nat_raw n;;
+
+let rec mk_chunk k n acc =
+  if k = 0 then acc
+  else mk_comb (const_array.(n mod maximum), mk_chunk (k - 1) (n / maximum) acc);;
+
+let rec mk_nat_big b =
+  if Big_int.is_int_big_int b then
+    mk_small_nat_raw (Big_int.int_of_big_int b)
+  else
+    let q, r = Big_int.quomod_big_int b chunk_big in
+    mk_chunk chunk_k (Big_int.int_of_big_int r) (mk_nat_big q);;
+
+let mk_nat n =
+  if sign_num n < 0 then
+    error_fmt "mk_nat: negative argument: %s" (string_of_num n)
+  else if not (is_integer_num n) then
+    error_fmt "mk_nat: non-integer argument: %s" (string_of_num n)
+  else
+    mk_nat_big (Num.big_int_of_num n);;
+
+let rec dest_chunk tm k acc p =
+  match tm with
+  | Const ("_0", _) -> acc, tm
+  | Comb (Const (name, _), rtm) ->
+    let acc' = acc + index_of_name name * p in
+    if k = 1 then acc', rtm
+    else dest_chunk rtm (k - 1) acc' (p * maximum)
+  | _ -> error "dest_nat" [tm] [];;
+
+let rec dest_nat_big tm =
+  match tm with
+  | Const ("_0", _) -> zero_big
+  | _ ->
+    let lo, rest = dest_chunk tm chunk_k 0 1 in
+    match rest with
+    | Const ("_0", _) -> Big_int.big_int_of_int lo
+    | _ ->
+      let hi = dest_nat_big rest in
+      Big_int.add_int_big_int lo (Big_int.mult_big_int chunk_big hi);;
+
+let dest_nat tm =
+  let lo, rest = dest_chunk tm chunk_k 0 1 in
+  match rest with
+  | Const ("_0", _) -> num lo
+  | _ ->
+    let hi = dest_nat_big rest in
+    Num.num_of_big_int (Big_int.add_int_big_int lo (Big_int.mult_big_int chunk_big hi));;
+
+let size_nat =
+  let rec loop acc = function
+    | Const ("_0", _) -> acc
+    | Comb (Const (_, _), rtm) -> loop (acc + 1) rtm
+    | tm -> error "size_nat" [tm] [] in
+  loop 0;;
+
+(* Fast monomorphic structural equality on numeral terms (checks pointer == first) *)
+let rec eq_nat_tm a b =
+  a == b ||
+  match a with
+  | Const ("_0", _) ->
+    (match b with Const ("_0", _) -> true | _ -> false)
+  | Comb (Const (na, _), a') ->
+    (match b with
+     | Comb (Const (nb, _), b') -> na = nb && eq_nat_tm a' b'
+     | _ -> false)
+  | _ -> false;;
+
+let print_nat fmt tm =
+  try
+    let n = dest_nat tm in
+    let str = "'" ^ Num.string_of_num n in
+      Format.pp_print_string fmt str
+  with _ -> failwith "print_nat";;
+
+let pmk_nat =
+  let num_pty = Ptycon ("num", []) in
+  let max_bi = num maximum in
+  let rec pmk n =
+    if n =/ num_0 then Varp ("_0", num_pty)
+    else
+      let q = quo_num n max_bi in
+      let r = int_of_num (mod_num n max_bi) in
+      let digit = Varp (name_array.(r), Ptycon ("fun", [num_pty; num_pty])) in
+        Combp (digit, pmk q) in
+  fun n ->
+    if sign_num n < 0 then
+      error_fmt "pmk_nat: negative argument: %s" (string_of_num n)
+    else if not (is_integer_num n) then
+      error_fmt "pmk_nat: non-integer argument: %s" (string_of_num n)
+    else
+      pmk n;;
+
+let parse_nat ls =
+  match ls with
+  | Ident s :: rest when s <> "" && s.[0] = '\'' ->
+    (try
+      let n = num_of_string (String.sub s 1 (String.length s - 1)) in
+      pmk_nat n, rest
+    with Failure _ -> raise Noparse)
+  | _ -> raise Noparse;;
+
+(* ------------------------------------------------------------------------- *)
+(* TO_NAT_CONV and FROM_NAT_CONV                                             *)
+(* ------------------------------------------------------------------------- *)
+
+let sym_def_array = Array.init maximum (fun i -> standardize (SYM def_array.(i)));;
+
+let TO_NAT_CONV =
+  let mod_op_num = `MOD` in
+  let div_base =
+    let h1 = mk_eq (mk_binop div_op_num m_var_num max_const, q_var_num) in
+    let h2 = mk_eq (mk_binop mod_op_num m_var_num max_const, r_var_num) in
+    let c = mk_eq (m_var_num,
+       mk_binop add_op_num (mk_binop mul_op_num max_const q_var_num) r_var_num) in
+      (UNDISCH_ALL o standardize o ARITH_RULE) (mk_imp (h1, mk_imp (h2, c))) in
+  let rec conv tm =
+    if rand tm = zero_const then
+      zero_eq_zero_const
+    else
+      let th_div = NUM_DIV_CONV (mk_binop div_op_num tm max_const) in
+      let th_mod = NUM_MOD_CONV (mk_binop mod_op_num tm max_const) in
+      let q_tm = rand (concl th_div) in
+      let r_tm = rand (concl th_mod) in
+      let th0 = INST [tm, m_var_num; q_tm, q_var_num; r_tm, r_var_num] div_base in
+      let th1 = MY_PROVE_HYP th_mod (MY_PROVE_HYP th_div th0) in
+      let r = dest_small_numeral r_tm in
+      let th2 = INST [q_tm, n_var_num] sym_def_array.(r) in
+      let th = TRANS th1 th2 in
+      let ltm, rtm = dest_comb (rand (concl th)) in
+      let r_th = conv rtm in
+      TRANS th (AP_TERM ltm r_th) in
+  fun tm ->
+    match tm with
+    | Comb (Const ("NUMERAL", _), _) -> conv tm
+    | _ -> failwith "TO_NAT_CONV";;
+
+let rec FROM_NAT_CONV tm =
+  match tm with
+  | Const ("_0", _) -> zero_const_eq_zero
+  | Comb (Const (name, _) as b_tm, n_tm) ->
+    let n_th = FROM_NAT_CONV n_tm in
+    let n_tm' = rand (concl n_th) in
+    let i = index_of_name name in
+    let th1 = AP_TERM b_tm n_th in
+    let th2 = TRANS th1 (INST [n_tm', n_var_num] def_array.(i)) in
+    let ltm, rtm = dest_comb (rand (concl th2)) in
+    let mul_th = NUM_MULT_CONV (rand ltm) in
+    let add_th0 = AP_THM (AP_TERM add_op_num mul_th) rtm in
+    let add_th = TRANS add_th0 (NUM_ADD_CONV (rand (concl add_th0))) in
+    TRANS th2 add_th
+  | _ -> error "FROM_NAT_CONV" [tm] [];;
+
+let replace_numerals = rand o concl o DEPTH_CONV TO_NAT_CONV;;
+let REPLACE_NUMERALS = CONV_RULE (DEPTH_CONV TO_NAT_CONV);;
+
+(* ------------------------------------------------------------------------- *)
+(* SUC: nsuc                                                                 *)
+(* ------------------------------------------------------------------------- *)
+
+(* |- SUC _0 = F1 _0 *)
+let suc_0 = (standardize o prove)
+  (mk_eq (`SUC _0`, dj0_array.(1)),
+   REWRITE_TAC[def_array.(1); mul_n_0_z; ARITH_SUC; NUMERAL; ARITH_ADD]);;
+
+let suc_th i =
+  let cflag = i + 1 >= maximum in
+  let suc = if cflag then 0 else i + 1 in
+  let lhs = mk_comb (suc_op_num, mk_comb (const_array.(i), n_var_num)) in
+  let rhs = mk_comb (const_array.(suc),
+                     if cflag then mk_comb (suc_op_num, n_var_num) else n_var_num) in
+  prove (mk_eq (lhs, rhs), REWRITE_TAC[def_array.(i); def_array.(suc)] THEN ARITH_TAC);;
+
+let suc_array = Array.init maximum (standardize o suc_th);;
+let suc_max = suc_array.(maximum - 1);;
+
+let suc_0_array = Array.init maximum (fun i ->
+  let th = INST [zero_const, n_var_num] suc_array.(i) in
+  standardize (if i = maximum - 1 then TRANS th (AP_TERM d0_const suc_0) else th));;
+
+let rec nsuc tm =
+  match tm with
+  | Const ("_0", _) -> suc_0
+  | Comb (Const (name, _), Const ("_0", _)) ->
+    suc_0_array.(index_of_name name)
+  | Comb (Const (name, _), n_tm) ->
+    let i = index_of_name name in
+    if i = maximum - 1 then
+      let th = INST [n_tm, n_var_num] suc_max in
+      TRANS th (AP_TERM d0_const (nsuc n_tm))
+    else
+      INST [n_tm, n_var_num] suc_array.(i)
+  | _ -> error "nsuc" [tm] [];;
+
+(* ------------------------------------------------------------------------- *)
+(* n = 0 (neq0) and n = _0 (neq_zero)                                        *)
+(* ------------------------------------------------------------------------- *)
+
+let eq_0_lemma = ARITH_RULE `a + b = 0 <=> a = 0 /\ b = 0`;;
+
+(* Public neq0: |- tm = 0 <=> T/F *)
+let eq_d0_0 = (standardize o prove)
+  (mk_eq (mk_eq (mk_comb (d0_const, n_var_num), `0`), `n = 0`),
+   REWRITE_TAC[def_array.(0); ADD_CLAUSES; MULT_EQ_0; ARITH_EQ]);;
+
+let eq_0_0 = (standardize o prove)
+  (`_0 = 0 <=> T`,
+   REWRITE_TAC[NUMERAL]);;
+
+let eq_0_i i =
+  let concl = mk_eq (mk_eq (mk_comb (const_array.(i), n_var_num), zero_num), f_const) in
+  prove (concl, REWRITE_TAC[def_array.(i); eq_0_lemma; ARITH_EQ]);;
+
+let eq0_array =
+  Array.init maximum (fun i -> standardize (if i = 0 then eq_0_0 else eq_0_i i));;
+
+let eq0_0_array = Array.init maximum (fun i ->
+  if i = 0 then
+    standardize (TRANS (INST [zero_const, n_var_num] eq_d0_0) eq_0_0), true
+  else
+    standardize (INST [zero_const, n_var_num] eq0_array.(i)), false);;
+
+let rec neq0 tm =
+  match tm with
+  | Const ("_0", _) -> eq_0_0, true
+  | Comb (Const (name, _), Const ("_0", _)) ->
+    eq0_0_array.(index_of_name name)
+  | Comb (Const (name, _), n_tm) ->
+    let i = index_of_name name in
+    if i = 0 then
+      let th0 = INST [n_tm, n_var_num] eq_d0_0 in
+      let th1, flag = neq0 n_tm in
+      TRANS th0 th1, flag
+    else
+      INST [n_tm, n_var_num] eq0_array.(i), false
+  | _ -> error "neq0" [tm] [];;
+
+(* Internal neq_zero: |- tm = _0 <=> T/F (avoids 0 <-> _0 rewrite in neq / npre) *)
+let eq_d0_z = (standardize o PURE_REWRITE_RULE[NUMERAL]) eq_d0_0;;
+let eq_z_z = (standardize o prove) (`_0 = _0 <=> T`, REWRITE_TAC[]);;
+
+let eqz_array =
+  Array.init maximum (fun i ->
+    if i = 0 then eq_z_z
+    else standardize (PURE_REWRITE_RULE[NUMERAL] eq0_array.(i)));;
+
+let eqz_0_array = Array.init maximum (fun i ->
+  if i = 0 then
+    standardize (TRANS (INST [zero_const, n_var_num] eq_d0_z) eq_z_z), true
+  else
+    standardize (INST [zero_const, n_var_num] eqz_array.(i)), false);;
+
+let rec neq_zero tm =
+  match tm with
+  | Const ("_0", _) -> eq_z_z, true
+  | Comb (Const (name, _), Const ("_0", _)) ->
+    eqz_0_array.(index_of_name name)
+  | Comb (Const (name, _), n_tm) ->
+    let i = index_of_name name in
+    if i = 0 then
+      let th0 = INST [n_tm, n_var_num] eq_d0_z in
+      let th1, flag = neq_zero n_tm in
+      TRANS th0 th1, flag
+    else
+      INST [n_tm, n_var_num] eqz_array.(i), false
+  | _ -> error "neq_zero" [tm] [];;
+
+(* ------------------------------------------------------------------------- *)
+(* PRE: npre (with 2-digit lookahead for F0)                                 *)
+(* ------------------------------------------------------------------------- *)
+
+let pre_0 = (standardize o prove)
+  (`PRE _0 = _0`,
+   MP_TAC (CONJUNCT1 PRE) THEN SIMP_TAC[NUMERAL]);;
+
+(* |- PRE (F1 _0) = _0 *)
+let pre_d1_0 = (standardize o prove)
+  (mk_eq (mk_comb (pre_op_num, dj0_array.(1)), zero_const),
+   REWRITE_TAC[def_array.(1); mul_n_0_z; ARITH_ADD; NUMERAL; ARITH_PRE; ARITH_EQ]);;
+
+(* n = _0 <=> T |- PRE (F0 n) = _0 *)
+let pre_d0_n0 = (UNDISCH_ALL o standardize o prove)
+  (mk_imp (`n = _0 <=> T`, mk_eq (mk_comb (pre_op_num, mk_comb (d0_const, n_var_num)), zero_const)),
+   REWRITE_TAC[d0_explicit] THEN
+   DISCH_THEN (fun th -> REWRITE_TAC[th; mul_n_0_z]) THEN
+   REWRITE_TAC[NUMERAL; ARITH_PRE]);;
+
+let pre_d0_0 = standardize (MY_PROVE_HYP eq_z_z (INST [zero_const, n_var_num] pre_d0_n0));;
+
+(* PRE n = F_{max-1} m |- PRE (F0 n) = F_{max-1} (F_{max-1} m) *)
+let pre_d0_chained =
+  let hyp_tm = mk_eq (mk_comb (pre_op_num, n_var_num), mk_comb (dmax_const, m_var_num)) in
+  let concl_tm = mk_eq (mk_comb (pre_op_num, mk_comb (d0_const, n_var_num)),
+                        mk_comb (dmax_const, mk_comb (dmax_const, m_var_num))) in
+  (UNDISCH_ALL o standardize o prove) (mk_imp (hyp_tm, concl_tm),
+    REWRITE_TAC[d0_explicit; def_array.(maximum - 1)] THEN ARITH_TAC);;
+
+let pre_lemma = (UNDISCH_ALL o standardize o ARITH_RULE) `SUC m = n ==> PRE n = m`;;
+
+let pre_th i =
+  let pre_tm = mk_comb (const_array.(i - 1), n_var_num) in
+  let suc_th = nsuc pre_tm in
+  let n_tm = rand (concl suc_th) in
+  let th0 = INST [pre_tm, m_var_num; n_tm, n_var_num] pre_lemma in
+    standardize (MY_PROVE_HYP suc_th th0);;
+
+let pre_array =
+  Array.init maximum (fun i -> if i = 0 then TRUTH else pre_th i);;
+
+let pre_0_array = Array.init maximum (fun i ->
+  if i = 0 then pre_d0_0
+  else if i = 1 then pre_d1_0
+  else standardize (INST [zero_const, n_var_num] pre_array.(i)));;
+
+(* |- PRE (F0 (F_j n)) = F_{max-1} (F_{j-1} n) for j >= 1 *)
+let pre_d0_th j =
+  if j = 0 then TRUTH
+  else
+    let pre_tm = mk_comb (dmax_const, mk_comb (const_array.(j - 1), n_var_num)) in
+    let suc_th = nsuc pre_tm in
+    let n_tm = rand (concl suc_th) in
+    let th0 = INST [pre_tm, m_var_num; n_tm, n_var_num] pre_lemma in
+      standardize (MY_PROVE_HYP suc_th th0);;
+
+let pre_d0_array = Array.init maximum pre_d0_th;;
+
+(* |- PRE (F0 (F1 _0)) = F_{max-1} _0 *)
+let pre_d0_d1_0 =
+  let pre_tm = dj0_array.(maximum - 1) in
+  let suc_th = nsuc pre_tm in
+  let n_tm = rand (concl suc_th) in
+  let th0 = INST [pre_tm, m_var_num; n_tm, n_var_num] pre_lemma in
+    standardize (MY_PROVE_HYP suc_th th0);;
+
+let pre_d0_0_array = Array.init maximum (fun j ->
+  if j = 0 then TRUTH
+  else if j = 1 then pre_d0_d1_0
+  else standardize (INST [zero_const, n_var_num] pre_d0_array.(j)));;
+
+let rec npre tm =
+  match tm with
+  | Const ("_0", _) -> pre_0
+  | Comb (Const (name, _), Const ("_0", _)) ->
+    pre_0_array.(index_of_name name)
+  | Comb (Const (name, _), n_tm) ->
+    let i = index_of_name name in
+    if i = 0 then
+      match n_tm with
+      | Comb (Const (name2, _), Const ("_0", _)) ->
+        let j = index_of_name name2 in
+        if j > 0 then pre_d0_0_array.(j)
+        else
+          let n_th, _ = neq_zero n_tm in
+          MY_PROVE_HYP n_th (INST [n_tm, n_var_num] pre_d0_n0)
+      | Comb (Const (name2, _), m_tm) ->
+        let j = index_of_name name2 in
+        if j > 0 then
+          INST [m_tm, n_var_num] pre_d0_array.(j)
+        else
+          let th_n = npre n_tm in
+          let rhs_n = rand (concl th_n) in
+          (match rhs_n with
+           | Const ("_0", _) ->
+             let n_th, _ = neq_zero n_tm in
+             MY_PROVE_HYP n_th (INST [n_tm, n_var_num] pre_d0_n0)
+           | Comb (_, q_tm) ->
+             let th0 = INST [n_tm, n_var_num; q_tm, m_var_num] pre_d0_chained in
+             MY_PROVE_HYP th_n th0
+           | _ -> error "npre" [tm] [])
+      | _ -> error "npre" [tm] []
+    else
+      INST [n_tm, n_var_num] pre_array.(i)
+  | _ -> error "npre" [tm] [];;
+
+(* ------------------------------------------------------------------------- *)
+(* EVEN and ODD: neven, nodd                                                 *)
+(* ------------------------------------------------------------------------- *)
+
+let even_const = standardize_tm `EVEN` and
+    odd_const = standardize_tm `ODD` and
+    iff_const = standardize_tm `<=>`;;
+
+let even_zero = (standardize o prove) (`EVEN _0 <=> T`, REWRITE_TAC[ARITH_EVEN]) and
+    odd_zero = (standardize o prove) (`ODD _0 <=> F`, REWRITE_TAC[ARITH_ODD]);;
+
+(* |- EVEN (F0 n) <=> T *)
+let even_d0 = (standardize o prove)
+  (mk_eq (mk_comb (even_const, mk_comb (d0_const, n_var_num)), t_const),
+   REWRITE_TAC[d0_explicit; EVEN_MULT] THEN
+   DISJ1_TAC THEN CONV_TAC NUM_EVEN_CONV);;
+
+(* |- ODD (F0 n) <=> F *)
+let odd_d0 = (standardize o prove)
+  (mk_eq (mk_comb (odd_const, mk_comb (d0_const, n_var_num)), f_const),
+   REWRITE_TAC[NOT_ODD; even_d0]);;
+
+let next_even_th =
+  let even_suc_t = prove (`(EVEN (SUC n) <=> T) <=> (EVEN n <=> F)`, REWRITE_TAC[EVEN]) in
+  let even_suc_f = prove (`(EVEN (SUC n) <=> F) <=> (EVEN n <=> T)`, REWRITE_TAC[EVEN]) in
+  fun th ->
+    let ltm, rtm = dest_comb (concl th) in
+    let b_tm = rand (rand ltm) in
+    let suc_b = nsuc b_tm in
+    let flag = (fst o dest_const) rtm = "T" in
+    let th0 = SYM (AP_TERM even_const suc_b) in
+    let th1 = AP_THM (AP_TERM iff_const th0) (if flag then f_const else t_const) in
+    let th2 = INST [b_tm, n_var_num] (if flag then even_suc_f else even_suc_t) in
+    EQ_MP (SYM (TRANS th1 th2)) th;;
+
+let next_odd_th =
+  let odd_suc_t = prove (`(ODD (SUC n) <=> T) <=> (ODD n <=> F)`, REWRITE_TAC[ODD]) in
+  let odd_suc_f = prove (`(ODD (SUC n) <=> F) <=> (ODD n <=> T)`, REWRITE_TAC[ODD]) in
+  fun th ->
+    let ltm, rtm = dest_comb (concl th) in
+    let b_tm = rand (rand ltm) in
+    let suc_b = nsuc b_tm in
+    let flag = (fst o dest_const) rtm = "T" in
+    let th0 = SYM (AP_TERM odd_const suc_b) in
+    let th1 = AP_THM (AP_TERM iff_const th0) (if flag then f_const else t_const) in
+    let th2 = INST [b_tm, n_var_num] (if flag then odd_suc_f else odd_suc_t) in
+    EQ_MP (SYM (TRANS th1 th2)) th;;
+
+let even_array =
+  let r = Array.init maximum (fun _ -> even_d0, true) in
+  for i = 1 to maximum - 1 do
+    r.(i) <- standardize (next_even_th (fst r.(i - 1))), i mod 2 = 0
+  done;
+  r;;
+
+let even_0_array = Array.init maximum (fun i ->
+  let th, flag = even_array.(i) in
+  standardize (INST [zero_const, n_var_num] th), flag);;
+
+let odd_array =
+  let r = Array.init maximum (fun _ -> odd_d0, false) in
+  for i = 1 to maximum - 1 do
+    r.(i) <- standardize (next_odd_th (fst r.(i - 1))), i mod 2 = 1
+  done;
+  r;;
+
+let odd_0_array = Array.init maximum (fun i ->
+  let th, flag = odd_array.(i) in
+  standardize (INST [zero_const, n_var_num] th), flag);;
+
+let neven tm =
+  match tm with
+  | Const ("_0", _) -> even_zero, true
+  | Comb (Const (name, _), Const ("_0", _)) ->
+    even_0_array.(index_of_name name)
+  | Comb (Const (name, _), n_tm) ->
+    let th0, flag = even_array.(index_of_name name) in
+    INST [n_tm, n_var_num] th0, flag
+  | _ -> error "neven" [tm] [];;
+
+let nodd tm =
+  match tm with
+  | Const ("_0", _) -> odd_zero, false
+  | Comb (Const (name, _), Const ("_0", _)) ->
+    odd_0_array.(index_of_name name)
+  | Comb (Const (name, _), n_tm) ->
+    let th0, flag = odd_array.(index_of_name name) in
+    INST [n_tm, n_var_num] th0, flag
+  | _ -> error "nodd" [tm] [];;
+
+(* ------------------------------------------------------------------------- *)
+(* 0 < n: ngt0                                                               *)
+(* ------------------------------------------------------------------------- *)
+
+let gt0_0 = (standardize o prove) (`0 < _0 <=> F`, REWRITE_TAC[ARITH_LT; NUMERAL]);;
+
+(* |- 0 < F0 n <=> 0 < n *)
+let gt0_d0 = (standardize o prove)
+  (mk_eq (mk_binop lt_op_num zero_num (mk_comb (d0_const, n_var_num)), `0 < n`),
+   REWRITE_TAC[def_array.(0)] THEN ARITH_TAC);;
+
+let gt0_th i =
+  let concl = mk_eq (mk_binop lt_op_num zero_num (mk_comb (const_array.(i), n_var_num)), t_const) in
+  prove (concl, REWRITE_TAC[def_array.(i)] THEN ARITH_TAC);;
+
+let gt0_array =
+  Array.init maximum (fun i -> standardize (if i = 0 then gt0_d0 else gt0_th i));;
+
+let gt0_0_array = Array.init maximum (fun i ->
+  if i = 0 then
+    standardize (TRANS (INST [zero_const, n_var_num] gt0_d0) gt0_0), false
+  else
+    standardize (INST [zero_const, n_var_num] gt0_array.(i)), true);;
+
+let rec ngt0 tm =
+  match tm with
+  | Const ("_0", _) -> gt0_0, false
+  | Comb (Const (name, _), Const ("_0", _)) ->
+    gt0_0_array.(index_of_name name)
+  | Comb (Const (name, _), n_tm) ->
+    let i = index_of_name name in
+    if i = 0 then
+      let th0 = INST [n_tm, n_var_num] gt0_d0 in
+      let th1, flag = ngt0 n_tm in
+      TRANS th0 th1, flag
+    else
+      INST [n_tm, n_var_num] gt0_array.(i), true
+  | _ -> error "ngt0" [tm] [];;
+
+(* ------------------------------------------------------------------------- *)
+(* m = n: neq                                                                *)
+(* ------------------------------------------------------------------------- *)
+
+let eq_refl_t = (standardize o prove) (`(n:num = n) <=> T`, REWRITE_TAC[]);;
+let eq_z_sym = (standardize o prove) (`_0 = n <=> n = _0`, REWRITE_TAC[EQ_SYM_EQ]);;
+
+let gen_di_eq_dj =
+  let aux_th = prove
+    (`i < b /\ j < b /\ ~(i = j) ==> ~(b * m + i = b * n + j:num)`,
+     ONCE_REWRITE_TAC[ARITH_RULE `b * m + i = b * n + j <=> m * b + i = n * b + j:num`] THEN
+     STRIP_TAC THEN POP_ASSUM MP_TAC THEN
+     SUBGOAL_THEN `~(b = 0)` ASSUME_TAC THENL [POP_ASSUM MP_TAC THEN ARITH_TAC; ALL_TAC] THEN
+     REWRITE_TAC[CONTRAPOS_THM] THEN
+     DISCH_TAC THEN FIRST_ASSUM (MP_TAC o AP_TERM `\x. x DIV b`) THEN REWRITE_TAC[] THEN
+     FIRST_ASSUM (MP_TAC o MATCH_MP (CONJUNCT1 DIV_MULT_ADD)) THEN
+     DISCH_THEN (fun th -> REWRITE_TAC[th]) THEN
+     SUBGOAL_THEN `i DIV b = 0 /\ j DIV b = 0` (fun th -> REWRITE_TAC[th]) THENL [
+       FIRST_ASSUM (ASSUME_TAC o MATCH_MP DIV_EQ_0) THEN ASM_REWRITE_TAC[];
+       ALL_TAC
+     ] THEN
+     REWRITE_TAC[ADD_0] THEN DISCH_TAC THEN
+     UNDISCH_TAC `m * b + i = n * b + j:num` THEN
+     ASM_REWRITE_TAC[] THEN ARITH_TAC) in
+  fun i j ->
+    let di_m = mk_comb (const_array.(i), m_var_num) in
+    let dj_n = mk_comb (const_array.(j), n_var_num) in
+    let eq_tm = mk_binop eq_op_num di_m dj_n in
+    if i = j then
+      (standardize o prove) (mk_eq (eq_tm, mk_binop eq_op_num m_var_num n_var_num),
+        REWRITE_TAC[def_array.(i)] THEN ARITH_TAC)
+    else
+      (standardize o prove) (mk_eq (eq_tm, f_const),
+        REWRITE_TAC[def_array.(i); def_array.(j)] THEN
+        MATCH_MP_TAC aux_th THEN CONV_TAC NUM_REDUCE_CONV);;
+
+let gen_next_eq_thm =
+  let suc_eq_th = ARITH_RULE `SUC m = SUC n <=> m = n` in
+  fun th ->
+    let ltm, n_tm = (dest_comb o lhand o concl) th in
+    let m_tm = rand ltm in
+    let th0 = INST [m_tm, m_var_num; n_tm, n_var_num] suc_eq_th in
+    let suc_m = nsuc m_tm in
+    let suc_n = nsuc n_tm in
+    let th1 = SYM (MK_COMB (AP_TERM eq_op_num suc_m, suc_n)) in
+    standardize (TRANS (TRANS th1 th0) th);;
+
+let eq_array =
+  let eqs = Array.make (maximum * maximum) TRUTH in
+  let sym = standardize o INST [n_var_num, m_var_num; m_var_num, n_var_num] o
+            CONV_RULE (LAND_CONV SYM_CONV) in
+  for i = 0 to maximum - 1 do
+    let th = ref (gen_di_eq_dj 0 i) in
+    eqs.(i) <- !th;
+    if i > 0 then eqs.(i * maximum) <- sym !th;
+    for k = 1 to maximum - i - 1 do
+      let x = k and y = i + k in
+      th := gen_next_eq_thm !th;
+      eqs.(x * maximum + y) <- !th;
+      if y > x then eqs.(y * maximum + x) <- sym !th
+    done
+  done;
+  eqs;;
+
+let eq_00_array = Array.init (maximum * maximum) (fun idx ->
+  let i = idx / maximum and j = idx mod maximum in
+  if i = j then
+    INST [dj0_array.(i), n_var_num] eq_refl_t, true
+  else
+    INST [zero_const, m_var_num; zero_const, n_var_num] eq_array.(idx), false);;
+
+let rec neq_rec ltm rtm =
+  match rtm with
+  | Const ("_0", _) -> neq_zero ltm
+  | Comb (Const (name2, _), n_tm) ->
+    (match ltm with
+     | Const ("_0", _) ->
+       let th0, flag = neq_zero rtm in
+       TRANS (INST [rtm, n_var_num] eq_z_sym) th0, flag
+     | Comb (Const (name1, _), m_tm) ->
+       let i1 = index_of_name name1 and i2 = index_of_name name2 in
+       let idx = i1 * maximum + i2 in
+       (match m_tm with
+        | Const ("_0", _) ->
+          (match n_tm with
+           | Const ("_0", _) -> eq_00_array.(idx)
+           | _ ->
+             let th0 = INST [m_tm, m_var_num; n_tm, n_var_num] eq_array.(idx) in
+             if i1 <> i2 then th0, false
+             else
+               let th1, flag = neq_zero n_tm in
+               TRANS th0 (TRANS (INST [n_tm, n_var_num] eq_z_sym) th1), flag)
+        | _ ->
+          let th0 = INST [m_tm, m_var_num; n_tm, n_var_num] eq_array.(idx) in
+          if i1 <> i2 then th0, false
+          else
+            let th1, flag = neq_rec m_tm n_tm in
+            TRANS th0 th1, flag)
+     | _ -> error "neq" [ltm; rtm] [])
+  | _ -> error "neq" [ltm; rtm] [];;
+
+let neq ltm rtm =
+  if eq_nat_tm ltm rtm then
+    INST [ltm, n_var_num] eq_refl_t, true
+  else
+    neq_rec ltm rtm;;
+
+(* ------------------------------------------------------------------------- *)
+(* m < n and m <= n: nlt, nle                                                *)
+(* ------------------------------------------------------------------------- *)
+
+let lt_n_0 = (standardize o prove)
+  (`n < _0 <=> F`,
+   PURE_ONCE_REWRITE_TAC[zero_const_eq_zero] THEN ARITH_TAC);;
+
+let le_0_n = (standardize o prove)
+  (`_0 <= n <=> T`,
+   PURE_ONCE_REWRITE_TAC[zero_const_eq_zero] THEN ARITH_TAC);;
+
+let lt_refl_f = (standardize o prove) (`(n:num < n) <=> F`, ARITH_TAC);;
+let le_refl_t = (standardize o prove) (`(n:num <= n) <=> T`, ARITH_TAC);;
+
+let lt_0_0 = standardize (INST [zero_const, n_var_num] lt_n_0);;
+let le_0_0 = standardize (INST [zero_const, n_var_num] le_0_n);;
+
+(* |- _0 < F_i(n) <=> T (or |- _0 < F0(n) <=> _0 < n) *)
+let gen_0_lt_di i =
+  let di_n = mk_comb (const_array.(i), n_var_num) in
+  let lt_tm = mk_binop lt_op_num zero_num di_n in
+  if i > 0 then
+    (PURE_REWRITE_RULE[NUMERAL] o EQT_INTRO o prove)
+      (lt_tm, REWRITE_TAC[def_array.(i)] THEN ARITH_TAC)
+  else
+    (PURE_REWRITE_RULE[NUMERAL] o prove)
+      (mk_eq (lt_tm, `0 < n`), REWRITE_TAC[d0_explicit] THEN ARITH_TAC);;
+
+let lt0_array = Array.init maximum (standardize o gen_0_lt_di);;
+
+let lt0_0_array = Array.init maximum (fun i ->
+  if i = 0 then
+    standardize (TRANS (INST [zero_const, n_var_num] lt0_array.(0)) lt_0_0), false
+  else
+    standardize (INST [zero_const, n_var_num] lt0_array.(i)), true);;
+
+let gen_di_lt_dj i j =
+  let di_m = mk_comb (const_array.(i), m_var_num) in
+  let dj_n = mk_comb (const_array.(j), n_var_num) in
+  let lt_tm = mk_binop lt_op_num di_m dj_n in
+  let rhs =
+    if i >= j then mk_binop lt_op_num m_var_num n_var_num
+    else mk_binop le_op_num m_var_num n_var_num in
+  (standardize o prove) (mk_eq (lt_tm, rhs),
+    REWRITE_TAC[def_array.(i); def_array.(j)] THEN ARITH_TAC);;
+
+let gen_next_lt_thm =
+  let suc_lt_thm = ARITH_RULE `SUC m < SUC n <=> m < n` in
+  fun th ->
+    let ltm, n_tm = (dest_comb o lhand o concl) th in
+    let m_tm = rand ltm in
+    let th0 = INST [m_tm, m_var_num; n_tm, n_var_num] suc_lt_thm in
+    let suc_m = nsuc m_tm in
+    let suc_n = nsuc n_tm in
+    let th1 = SYM (MK_COMB (AP_TERM lt_op_num suc_m, suc_n)) in
+    standardize (TRANS (TRANS th1 th0) th);;
+
+let lt_array =
+  let r = Array.make (maximum * maximum) TRUTH in
+  for i = 0 to maximum - 1 do
+    let th = ref (gen_di_lt_dj 0 i) in
+    r.(i) <- !th;
+    for k = 1 to maximum - i - 1 do
+      let x = k and y = i + k in
+      th := gen_next_lt_thm !th;
+      r.(x * maximum + y) <- !th
+    done
+  done;
+  for i = 1 to maximum - 1 do
+    let th = ref (gen_di_lt_dj i 0) in
+    r.(i * maximum) <- !th;
+    for k = 1 to maximum - i - 1 do
+      let x = i + k and y = k in
+      th := gen_next_lt_thm !th;
+      r.(x * maximum + y) <- !th
+    done
+  done;
+  r;;
+
+let lt_00_array = Array.init (maximum * maximum) (fun idx ->
+  let i = idx / maximum and j = idx mod maximum in
+  let th0 = INST [zero_const, m_var_num; zero_const, n_var_num] lt_array.(idx) in
+  if i >= j then TRANS th0 lt_0_0, false
+  else TRANS th0 le_0_0, true);;
+
+(* |- F_i(_0) < F_j(n) <=> T (if i < j) or <=> _0 < n (if i >= j) *)
+let lt_0n_array = Array.init (maximum * maximum) (fun idx ->
+  let i = idx / maximum and j = idx mod maximum in
+  let th0 = INST [zero_const, m_var_num] lt_array.(idx) in
+  if i < j then TRANS th0 le_0_n else th0);;
+
+(* |- F_i(m) < F_j(_0) <=> F (if i >= j) or <=> m <= _0 (if i < j) *)
+let lt_m0_array = Array.init (maximum * maximum) (fun idx ->
+  let i = idx / maximum and j = idx mod maximum in
+  let th0 = INST [zero_const, n_var_num] lt_array.(idx) in
+  if i >= j then TRANS th0 (INST [m_var_num, n_var_num] lt_n_0) else th0);;
+
+(* |- F_i(n) <= _0 <=> F (or |- F0(n) <= _0 <=> n <= _0) *)
+let gen_di_le_0 i =
+  let di_n = mk_comb (const_array.(i), n_var_num) in
+  let le_tm = mk_binop le_op_num di_n zero_num in
+  if i > 0 then
+    (PURE_REWRITE_RULE[NUMERAL] o prove)
+      (mk_eq (le_tm, f_const), REWRITE_TAC[def_array.(i)] THEN ARITH_TAC)
+  else
+    (PURE_REWRITE_RULE[NUMERAL] o prove)
+      (mk_eq (le_tm, `n <= 0`), REWRITE_TAC[d0_explicit] THEN ARITH_TAC);;
+
+let le0_array = Array.init maximum (standardize o gen_di_le_0);;
+
+let le0_0_array = Array.init maximum (fun i ->
+  if i = 0 then
+    standardize (TRANS (INST [zero_const, n_var_num] le0_array.(0)) le_0_0), true
+  else
+    standardize (INST [zero_const, n_var_num] le0_array.(i)), false);;
+
+let gen_di_le_dj i j =
+  let di_m = mk_comb (const_array.(i), m_var_num) in
+  let dj_n = mk_comb (const_array.(j), n_var_num) in
+  let le_tm = mk_binop le_op_num di_m dj_n in
+  let rhs =
+    if i > j then mk_binop lt_op_num m_var_num n_var_num
+    else mk_binop le_op_num m_var_num n_var_num in
+  (standardize o prove) (mk_eq (le_tm, rhs),
+    REWRITE_TAC[def_array.(i); def_array.(j)] THEN ARITH_TAC);;
+
+let gen_next_le_thm =
+  let suc_le_thm = ARITH_RULE `SUC m <= SUC n <=> m <= n` in
+  fun th ->
+    let ltm, n_tm = (dest_comb o lhand o concl) th in
+    let m_tm = rand ltm in
+    let th0 = INST [m_tm, m_var_num; n_tm, n_var_num] suc_le_thm in
+    let suc_m = nsuc m_tm in
+    let suc_n = nsuc n_tm in
+    let th1 = SYM (MK_COMB (AP_TERM le_op_num suc_m, suc_n)) in
+    standardize (TRANS (TRANS th1 th0) th);;
+
+let le_array =
+  let r = Array.make (maximum * maximum) TRUTH in
+  for i = 0 to maximum - 1 do
+    let th = ref (gen_di_le_dj 0 i) in
+    r.(i) <- !th;
+    for k = 1 to maximum - i - 1 do
+      let x = k and y = i + k in
+      th := gen_next_le_thm !th;
+      r.(x * maximum + y) <- !th
+    done
+  done;
+  for i = 1 to maximum - 1 do
+    let th = ref (gen_di_le_dj i 0) in
+    r.(i * maximum) <- !th;
+    for k = 1 to maximum - i - 1 do
+      let x = i + k and y = k in
+      th := gen_next_le_thm !th;
+      r.(x * maximum + y) <- !th
+    done
+  done;
+  r;;
+
+let le_00_array = Array.init (maximum * maximum) (fun idx ->
+  let i = idx / maximum and j = idx mod maximum in
+  let th0 = INST [zero_const, m_var_num; zero_const, n_var_num] le_array.(idx) in
+  if i > j then TRANS th0 lt_0_0, false
+  else TRANS th0 le_0_0, true);;
+
+(* |- F_i(_0) <= F_j(n) <=> T (if i <= j) or <=> _0 < n (if i > j) *)
+let le_0n_array = Array.init (maximum * maximum) (fun idx ->
+  let i = idx / maximum and j = idx mod maximum in
+  let th0 = INST [zero_const, m_var_num] le_array.(idx) in
+  if i <= j then TRANS th0 le_0_n else th0);;
+
+(* |- F_i(m) <= F_j(_0) <=> F (if i > j) or <=> m <= _0 (if i <= j) *)
+let le_m0_array = Array.init (maximum * maximum) (fun idx ->
+  let i = idx / maximum and j = idx mod maximum in
+  let th0 = INST [zero_const, n_var_num] le_array.(idx) in
+  if i > j then TRANS th0 (INST [m_var_num, n_var_num] lt_n_0) else th0);;
+
+let rec nlt_0 rtm =
+  match rtm with
+  | Const ("_0", _) -> lt_0_0, false
+  | Comb (Const (name2, _), Const ("_0", _)) ->
+    lt0_0_array.(index_of_name name2)
+  | Comb (Const (name2, _), n_tm) ->
+    let j = index_of_name name2 in
+    if j = 0 then
+      let th0 = INST [n_tm, n_var_num] lt0_array.(0) in
+      let th1, flag = nlt_0 n_tm in
+      TRANS th0 th1, flag
+    else
+      INST [n_tm, n_var_num] lt0_array.(j), true
+  | _ -> error "nlt_0" [rtm] [];;
+
+let rec nle_0 ltm =
+  match ltm with
+  | Const ("_0", _) -> le_0_0, true
+  | Comb (Const (name1, _), Const ("_0", _)) ->
+    le0_0_array.(index_of_name name1)
+  | Comb (Const (name1, _), m_tm) ->
+    let i = index_of_name name1 in
+    if i = 0 then
+      let th0 = INST [m_tm, n_var_num] le0_array.(0) in
+      let th1, flag = nle_0 m_tm in
+      TRANS th0 th1, flag
+    else
+      INST [m_tm, n_var_num] le0_array.(i), false
+  | _ -> error "nle_0" [ltm] [];;
+
+let rec nlt_rec ltm rtm =
+  match rtm with
+  | Const ("_0", _) -> INST [ltm, n_var_num] lt_n_0, false
+  | Comb (Const (name2, _), n_tm) ->
+    (match ltm with
+     | Const ("_0", _) -> nlt_0 rtm
+     | Comb (Const (name1, _), m_tm) ->
+       let i1 = index_of_name name1 and i2 = index_of_name name2 in
+       let idx = i1 * maximum + i2 in
+       (match m_tm with
+        | Const ("_0", _) ->
+          (match n_tm with
+           | Const ("_0", _) -> lt_00_array.(idx)
+           | _ ->
+             let th0 = INST [n_tm, n_var_num] lt_0n_array.(idx) in
+             if i1 < i2 then th0, true
+             else
+               let th1, flag = nlt_0 n_tm in
+               TRANS th0 th1, flag)
+        | _ ->
+          (match n_tm with
+           | Const ("_0", _) ->
+             let th0 = INST [m_tm, m_var_num] lt_m0_array.(idx) in
+             if i1 >= i2 then th0, false
+             else
+               let th1, flag = nle_0 m_tm in
+               TRANS th0 th1, flag
+           | _ ->
+             let th0 = INST [m_tm, m_var_num; n_tm, n_var_num] lt_array.(idx) in
+             let th1, flag =
+               if i1 >= i2 then nlt_rec m_tm n_tm
+               else nle_rec m_tm n_tm in
+             TRANS th0 th1, flag))
+     | _ -> error "nlt" [ltm; rtm] [])
+  | _ -> error "nlt" [ltm; rtm] []
+
+and nle_rec ltm rtm =
+  match ltm with
+  | Const ("_0", _) -> INST [rtm, n_var_num] le_0_n, true
+  | Comb (Const (name1, _), m_tm) ->
+    (match rtm with
+     | Const ("_0", _) -> nle_0 ltm
+     | Comb (Const (name2, _), n_tm) ->
+       let i1 = index_of_name name1 and i2 = index_of_name name2 in
+       let idx = i1 * maximum + i2 in
+       (match m_tm with
+        | Const ("_0", _) ->
+          (match n_tm with
+           | Const ("_0", _) -> le_00_array.(idx)
+           | _ ->
+             let th0 = INST [n_tm, n_var_num] le_0n_array.(idx) in
+             if i1 <= i2 then th0, true
+             else
+               let th1, flag = nlt_0 n_tm in
+               TRANS th0 th1, flag)
+        | _ ->
+          (match n_tm with
+           | Const ("_0", _) ->
+             let th0 = INST [m_tm, m_var_num] le_m0_array.(idx) in
+             if i1 > i2 then th0, false
+             else
+               let th1, flag = nle_0 m_tm in
+               TRANS th0 th1, flag
+           | _ ->
+             let th0 = INST [m_tm, m_var_num; n_tm, n_var_num] le_array.(idx) in
+             let th1, flag =
+               if i1 > i2 then nlt_rec m_tm n_tm
+               else nle_rec m_tm n_tm in
+             TRANS th0 th1, flag))
+     | _ -> error "nle" [ltm; rtm] [])
+  | _ -> error "nle" [ltm; rtm] [];;
+
+let nlt ltm rtm =
+  if eq_nat_tm ltm rtm then INST [ltm, n_var_num] lt_refl_f, false
+  else nlt_rec ltm rtm;;
+
+let nle ltm rtm =
+  if eq_nat_tm ltm rtm then INST [ltm, n_var_num] le_refl_t, true
+  else nle_rec ltm rtm;;
+
+(* ------------------------------------------------------------------------- *)
+(* MAX m n, MIN m n: nmax, nmin                                              *)
+(* ------------------------------------------------------------------------- *)
+
+let max_case1 = (UNDISCH_ALL o standardize o ARITH_RULE) `(m <= n <=> T) ==> MAX m n = n`;;
+let max_case2 = (UNDISCH_ALL o standardize o ARITH_RULE) `(m <= n <=> F) ==> MAX m n = m`;;
+let min_case1 = (UNDISCH_ALL o standardize o ARITH_RULE) `(m <= n <=> T) ==> MIN m n = m`;;
+let min_case2 = (UNDISCH_ALL o standardize o ARITH_RULE) `(m <= n <=> F) ==> MIN m n = n`;;
+
+let max_refl = (standardize o ARITH_RULE) `MAX n n = n`;;
+let min_refl = (standardize o ARITH_RULE) `MIN n n = n`;;
+
+let nmax ltm rtm =
+  if eq_nat_tm ltm rtm then INST [ltm, n_var_num] max_refl
+  else
+    let le_th, flag = nle_rec ltm rtm in
+    let th0 = INST [ltm, m_var_num; rtm, n_var_num] (if flag then max_case1 else max_case2) in
+    MY_PROVE_HYP le_th th0;;
+
+let nmin ltm rtm =
+  if eq_nat_tm ltm rtm then INST [ltm, n_var_num] min_refl
+  else
+    let le_th, flag = nle_rec ltm rtm in
+    let th0 = INST [ltm, m_var_num; rtm, n_var_num] (if flag then min_case1 else min_case2) in
+    MY_PROVE_HYP le_th th0;;
+
+(* ------------------------------------------------------------------------- *)
+(* m + n: nadd                                                               *)
+(* ------------------------------------------------------------------------- *)
+
+let cadd_0_n = (standardize o prove) (`SUC (_0 + n) = SUC n`, REWRITE_TAC[add_0_n]);;
+let cadd_n_0 = (standardize o prove) (`SUC (n + _0) = SUC n`, REWRITE_TAC[add_n_0]);;
+let cadd_m_0 = standardize (INST [m_var_num, n_var_num] cadd_n_0);;
+
+let th_add_right_next =
+  let suc_add_right = ARITH_RULE `SUC (m + n) = m + SUC n` in
+  fun th ->
+    let lhs, rhs = dest_eq (concl th) in
+    let ltm, rtm = dest_comb rhs in
+    let i = index_of_name (fst (dest_const ltm)) in
+    let suc_th = AP_TERM suc_op_num th in
+    let th_rhs = INST [rtm, n_var_num] suc_array.(i) in
+    let ltm, rarg = dest_comb lhs in
+    let larg = rand ltm in
+    let th1 = INST [larg, m_var_num; rarg, n_var_num] suc_add_right in
+    let j = index_of_name (fst (dest_const (rator rarg))) in
+    let th_lhs = TRANS th1 (AP_TERM ltm suc_array.(j)) in
+    standardize (TRANS (TRANS (SYM th_lhs) suc_th) th_rhs);;
+
+let add_array =
+  let r = Array.make (maximum * maximum) TRUTH in
+  let d0_add = (standardize o prove)
+    (mk_eq (mk_binop add_op_num (mk_comb (d0_const, m_var_num)) (mk_comb (d0_const, n_var_num)),
+            mk_comb (d0_const, mk_binop add_op_num m_var_num n_var_num)),
+     REWRITE_TAC[d0_explicit] THEN ARITH_TAC) in
+  for i = 0 to maximum - 1 do
+    let th0 =
+      if i = 0 then d0_add
+      else
+        standardize (INST [n_var_num, m_var_num; m_var_num, n_var_num]
+          (ONCE_REWRITE_RULE[ADD_AC] r.(i))) in
+    r.(i * maximum) <- th0;
+    for j = 1 to maximum - 1 do
+      r.(i * maximum + j) <- th_add_right_next r.(i * maximum + j - 1)
+    done
+  done;
+  r;;
+
+let cadd_array =
+  Array.init (maximum * maximum) (fun idx ->
+    let th0 = AP_TERM suc_op_num add_array.(idx) in
+    let _, rtm = dest_comb (rand (concl th0)) in
+    let ltm, rtm = dest_comb rtm in
+    let k = index_of_name (fst (dest_const ltm)) in
+    standardize (TRANS th0 (INST [rtm, n_var_num] suc_array.(k))));;
+
+let add_bit_array = Array.init (maximum * maximum) (fun idx ->
+  let i = idx / maximum and j = idx mod maximum in
+  const_array.(if i + j >= maximum then i + j - maximum else i + j));;
+
+let cadd_bit_array = Array.init (maximum * maximum) (fun idx ->
+  let i = idx / maximum and j = idx mod maximum in
+  const_array.(if i + j + 1 >= maximum then i + j + 1 - maximum else i + j + 1));;
+
+let add_0n_array = Array.init (maximum * maximum) (fun idx ->
+  let i = idx / maximum and j = idx mod maximum in
+  let th0 = INST [zero_const, m_var_num] add_array.(idx) in
+  TRANS th0 (AP_TERM add_bit_array.(idx)
+    (if i + j >= maximum then cadd_0_n else add_0_n)));;
+
+let add_m0_array = Array.init (maximum * maximum) (fun idx ->
+  let i = idx / maximum and j = idx mod maximum in
+  let th0 = INST [zero_const, n_var_num] add_array.(idx) in
+  TRANS th0 (AP_TERM add_bit_array.(idx)
+    (if i + j >= maximum then cadd_m_0 else add_m_0)));;
+
+let add_00_array = Array.init (maximum * maximum) (fun idx ->
+  let i = idx / maximum and j = idx mod maximum in
+  let th0 = INST [zero_const, n_var_num] add_0n_array.(idx) in
+  if i + j >= maximum then TRANS th0 (AP_TERM add_bit_array.(idx) suc_0) else th0);;
+
+let cadd_0n_array = Array.init (maximum * maximum) (fun idx ->
+  let i = idx / maximum and j = idx mod maximum in
+  let th0 = INST [zero_const, m_var_num] cadd_array.(idx) in
+  TRANS th0 (AP_TERM cadd_bit_array.(idx)
+    (if i + j + 1 >= maximum then cadd_0_n else add_0_n)));;
+
+let cadd_m0_array = Array.init (maximum * maximum) (fun idx ->
+  let i = idx / maximum and j = idx mod maximum in
+  let th0 = INST [zero_const, n_var_num] cadd_array.(idx) in
+  TRANS th0 (AP_TERM cadd_bit_array.(idx)
+    (if i + j + 1 >= maximum then cadd_m_0 else add_m_0)));;
+
+let cadd_00_array = Array.init (maximum * maximum) (fun idx ->
+  let i = idx / maximum and j = idx mod maximum in
+  let th0 = INST [zero_const, n_var_num] cadd_0n_array.(idx) in
+  if i + j + 1 >= maximum then TRANS th0 (AP_TERM cadd_bit_array.(idx) suc_0) else th0);;
+
+let add_d_0_array = Array.init maximum (fun i ->
+  standardize (INST [dj0_array.(i), n_var_num] add_n_0));;
+
+(* Specialized single-digit addition: |- F_d(_0) + rtm = ... *)
+let nadd_digit d rtm =
+  match rtm with
+  | Const ("_0", _) -> add_d_0_array.(d)
+  | Comb (Const (nb, _), Const ("_0", _)) ->
+    add_00_array.(d * maximum + index_of_name nb)
+  | Comb (Const (nb, _), n_tm) ->
+    let j = index_of_name nb in
+    let idx = d * maximum + j in
+    let th = INST [n_tm, n_var_num] add_0n_array.(idx) in
+    if d + j >= maximum then TRANS th (AP_TERM add_bit_array.(idx) (nsuc n_tm))
+    else th
+  | _ -> error "nadd_digit" [rtm] [];;
+
+let rec nadd ltm rtm =
+  match ltm with
+  | Const ("_0", _) -> INST [rtm, n_var_num] add_0_n
+  | Comb (Const (na, _), m_tm) ->
+    (match rtm with
+     | Const ("_0", _) -> INST [ltm, n_var_num] add_n_0
+     | Comb (Const (nb, _), n_tm) ->
+       let i = index_of_name na and j = index_of_name nb in
+       let idx = i * maximum + j in
+       let cflag = i + j >= maximum in
+       (match m_tm with
+        | Const ("_0", _) ->
+          (match n_tm with
+           | Const ("_0", _) -> add_00_array.(idx)
+           | _ ->
+             let th = INST [n_tm, n_var_num] add_0n_array.(idx) in
+             if cflag then TRANS th (AP_TERM add_bit_array.(idx) (nsuc n_tm))
+             else th)
+        | _ ->
+          (match n_tm with
+           | Const ("_0", _) ->
+             let th = INST [m_tm, m_var_num] add_m0_array.(idx) in
+             if cflag then TRANS th (AP_TERM add_bit_array.(idx) (nsuc m_tm))
+             else th
+           | _ ->
+             let th = INST [m_tm, m_var_num; n_tm, n_var_num] add_array.(idx) in
+             let r_th = if cflag then nadc m_tm n_tm else nadd m_tm n_tm in
+             TRANS th (AP_TERM add_bit_array.(idx) r_th)))
+     | _ -> error "nadd" [ltm; rtm] [])
+  | _ -> error "nadd" [ltm; rtm] []
+
+and nadc ltm rtm =
+  match ltm with
+  | Const ("_0", _) ->
+    TRANS (INST [rtm, n_var_num] cadd_0_n) (nsuc rtm)
+  | Comb (Const (na, _), m_tm) ->
+    (match rtm with
+     | Const ("_0", _) ->
+       TRANS (INST [ltm, n_var_num] cadd_n_0) (nsuc ltm)
+     | Comb (Const (nb, _), n_tm) ->
+       let i = index_of_name na and j = index_of_name nb in
+       let idx = i * maximum + j in
+       let cflag = i + j + 1 >= maximum in
+       (match m_tm with
+        | Const ("_0", _) ->
+          (match n_tm with
+           | Const ("_0", _) -> cadd_00_array.(idx)
+           | _ ->
+             let th = INST [n_tm, n_var_num] cadd_0n_array.(idx) in
+             if cflag then TRANS th (AP_TERM cadd_bit_array.(idx) (nsuc n_tm))
+             else th)
+        | _ ->
+          (match n_tm with
+           | Const ("_0", _) ->
+             let th = INST [m_tm, m_var_num] cadd_m0_array.(idx) in
+             if cflag then TRANS th (AP_TERM cadd_bit_array.(idx) (nsuc m_tm))
+             else th
+           | _ ->
+             let th = INST [m_tm, m_var_num; n_tm, n_var_num] cadd_array.(idx) in
+             let r_th = if cflag then nadc m_tm n_tm else nadd m_tm n_tm in
+             TRANS th (AP_TERM cadd_bit_array.(idx) r_th)))
+     | _ -> error "nadc" [ltm; rtm] [])
+  | _ -> error "nadc" [ltm; rtm] [];;
+
+(* Specialized addition with F0(r0) on the left: |- F0(r0) + r1 = ... *)
+let nadd_d0 r0 r1 =
+  match r1 with
+  | Const ("_0", _) -> INST [mk_comb (d0_const, r0), n_var_num] add_n_0
+  | Comb (Const (nb, _), Const ("_0", _)) ->
+    let j = index_of_name nb in
+    (match r0 with
+     | Const ("_0", _) -> add_00_array.(j)
+     | _ -> INST [r0, m_var_num] add_m0_array.(j))
+  | Comb (Const (nb, _), r1') ->
+    let j = index_of_name nb in
+    (match r0 with
+     | Const ("_0", _) -> INST [r1', n_var_num] add_0n_array.(j)
+     | _ ->
+       let th = INST [r0, m_var_num; r1', n_var_num] add_array.(j) in
+       TRANS th (AP_TERM const_array.(j) (nadd r0 r1')))
+  | _ -> error "nadd_d0" [r0; r1] [];;
+
+(* ------------------------------------------------------------------------- *)
+(* Direct digit-spine subtraction helper (zero Big_int / Num allocation)     *)
+(* ------------------------------------------------------------------------- *)
+
+let rec build_rev acc = function
+  | [] -> acc
+  | d :: ds -> build_rev (mk_comb (const_array.(d), acc)) ds;;
+
+let rec strip_and_build = function
+  | [] -> zero_const
+  | 0 :: ds -> strip_and_build ds
+  | ds -> build_rev zero_const ds;;
+
+(* Computes (a - b) directly on digit spines if a >= b; returns None if a < b *)
+let sub_spine_opt a b =
+  let rec loop a b borrow acc =
+    match a with
+    | Const ("_0", _) ->
+      (match b with
+       | Const ("_0", _) ->
+         if borrow = 0 then Some (strip_and_build acc) else None
+       | _ -> None)
+    | Comb (Const (na, _), a') ->
+      (match b with
+       | Const ("_0", _) ->
+         if borrow = 0 then Some (build_rev a acc)
+         else
+           let d = index_of_name na - 1 in
+           if d < 0 then loop a' b 1 ((d + maximum) :: acc)
+           else if d = 0 then
+             match a' with
+             | Const ("_0", _) -> Some (strip_and_build acc)
+             | _ -> Some (build_rev (mk_comb (d0_const, a')) acc)
+           else
+             Some (build_rev (mk_comb (const_array.(d), a')) acc)
+       | Comb (Const (nb, _), b') ->
+         let d = index_of_name na - index_of_name nb - borrow in
+         if d < 0 then loop a' b' 1 ((d + maximum) :: acc)
+         else loop a' b' 0 (d :: acc)
+       | _ -> error "sub_spine_opt" [a; b] [])
+    | _ -> error "sub_spine_opt" [a; b] [] in
+  loop a b 0 [];;
+
+(* ------------------------------------------------------------------------- *)
+(* m - n: nsub, nsub_le                                                      *)
+(* ------------------------------------------------------------------------- *)
+
+let sub_lemma1 = (UNDISCH_ALL o standardize o ARITH_RULE) `n + t = m ==> m - n = t:num`;;
+let sub_lemma2 = (UNDISCH_ALL o standardize o REWRITE_RULE[NUMERAL] o ARITH_RULE) `m + t = n ==> m - n = 0`;;
+let sub_lt_lemma = (UNDISCH_ALL o standardize o PURE_REWRITE_RULE[NUMERAL] o ARITH_RULE)
+  `(m < n <=> T) ==> m - n = 0`;;
+let le_lemma = (UNDISCH_ALL o standardize o ARITH_RULE) `n + t = m ==> n <= m:num`;;
+
+let sub_0_n = (standardize o PURE_REWRITE_RULE[NUMERAL] o ARITH_RULE) `0 - n = 0`;;
+let sub_n_0 = (standardize o PURE_REWRITE_RULE[NUMERAL] o ARITH_RULE) `n - 0 = n`;;
+let sub_refl = (standardize o PURE_REWRITE_RULE[NUMERAL] o ARITH_RULE) `n - n = 0`;;
+let le_n_n = (standardize o ARITH_RULE) `n:num <= n`;;
+let le_0_n' = (standardize o PURE_REWRITE_RULE[NUMERAL] o ARITH_RULE) `0 <= n`;;
+
+(* 1-digit subtraction table: |- F_i(_0) - F_j(_0) = F_{i-j}(_0) or _0 *)
+let sub_00_array = Array.init (maximum * maximum) (fun idx ->
+  let i = idx / maximum and j = idx mod maximum in
+  if i = j then
+    INST [dj0_array.(i), n_var_num] sub_refl
+  else if i > j then
+    let d = i - j in
+    let th_add = add_00_array.(j * maximum + d) in
+    let th0 = INST [dj0_array.(j), n_var_num; dj0_array.(d), t_var_num; dj0_array.(i), m_var_num] sub_lemma1 in
+    MY_PROVE_HYP th_add th0
+  else
+    let th_lt = fst lt_00_array.(idx) in
+    let th0 = INST [dj0_array.(i), m_var_num; dj0_array.(j), n_var_num] sub_lt_lemma in
+    MY_PROVE_HYP th_lt th0);;
+
+(* 1-digit n <= m table for nsub_le *)
+let le_thm_00_array = Array.init (maximum * maximum) (fun idx ->
+  let i = idx / maximum and j = idx mod maximum in
+  if i = j then
+    INST [dj0_array.(i), n_var_num] le_n_n
+  else if i < j then
+    let d = j - i in
+    let th_add = add_00_array.(i * maximum + d) in
+    let th0 = INST [dj0_array.(i), n_var_num; dj0_array.(d), t_var_num; dj0_array.(j), m_var_num] le_lemma in
+    MY_PROVE_HYP th_add th0
+  else
+    TRUTH);;
+
+let nsub_fallback m_tm n_tm =
+  let m = dest_nat m_tm and n = dest_nat n_tm in
+  let t = m -/ n in
+  if sign_num t >= 0 then
+    let t_tm = mk_nat t in
+    let th0 = INST [n_tm, n_var_num; t_tm, t_var_num; m_tm, m_var_num] sub_lemma1 in
+    MY_PROVE_HYP (nadd n_tm t_tm) th0
+  else
+    let th_lt, _ = nlt_rec m_tm n_tm in
+    MY_PROVE_HYP th_lt (INST [m_tm, m_var_num; n_tm, n_var_num] sub_lt_lemma);;
+
+let nsub m_tm n_tm =
+  if eq_nat_tm m_tm n_tm then
+    INST [m_tm, n_var_num] sub_refl
+  else
+    match m_tm with
+    | Const ("_0", _) -> INST [n_tm, n_var_num] sub_0_n
+    | Comb (Const (na, _), m') ->
+      (match n_tm with
+       | Const ("_0", _) -> INST [m_tm, n_var_num] sub_n_0
+       | Comb (Const (nb, _), n') ->
+         (match m' with
+          | Const ("_0", _) ->
+            (match n' with
+             | Const ("_0", _) -> sub_00_array.(index_of_name na * maximum + index_of_name nb)
+             | _ ->
+               let th_lt, flag = nlt_rec m_tm n_tm in
+               if flag then
+                 MY_PROVE_HYP th_lt (INST [m_tm, m_var_num; n_tm, n_var_num] sub_lt_lemma)
+               else
+                 nsub_fallback m_tm n_tm)
+          | _ ->
+            (match sub_spine_opt m_tm n_tm with
+             | Some t_tm ->
+               let th_add = nadd n_tm t_tm in
+               let th0 = INST [n_tm, n_var_num; t_tm, t_var_num; m_tm, m_var_num] sub_lemma1 in
+               (try MY_PROVE_HYP th_add th0 with Failure _ -> nsub_fallback m_tm n_tm)
+             | None ->
+               let th_lt, flag = nlt_rec m_tm n_tm in
+               if flag then
+                 MY_PROVE_HYP th_lt (INST [m_tm, m_var_num; n_tm, n_var_num] sub_lt_lemma)
+               else
+                 nsub_fallback m_tm n_tm))
+       | _ -> error "nsub" [m_tm; n_tm] [])
+    | _ -> error "nsub" [m_tm; n_tm] [];;
+
+let nsub_le_fallback tm1 tm2 =
+  let m = dest_nat tm1 and n = dest_nat tm2 in
+  let t = m -/ n in
+  if sign_num t >= 0 then
+    let t_tm = mk_nat t in
+    let inst = INST [tm2, n_var_num; t_tm, t_var_num; tm1, m_var_num] in
+    let th_add = nadd tm2 t_tm in
+    (MY_PROVE_HYP th_add (inst sub_lemma1), MY_PROVE_HYP th_add (inst le_lemma), true)
+  else
+    let t_tm = mk_nat (abs_num t) in
+    let inst = INST [tm2, m_var_num; t_tm, t_var_num; tm1, n_var_num] in
+    let th_add = nadd tm1 t_tm in
+    (MY_PROVE_HYP th_add (inst sub_lemma1), MY_PROVE_HYP th_add (inst le_lemma), false);;
+
+(* Returns either (tm1 - tm2, tm2 <= tm1, true) or (tm2 - tm1, tm1 <= tm2, false) *)
+let nsub_le tm1 tm2 =
+  if eq_nat_tm tm1 tm2 then
+    (INST [tm1, n_var_num] sub_refl, INST [tm1, n_var_num] le_n_n, true)
+  else
+    match tm2 with
+    | Const ("_0", _) ->
+      (INST [tm1, n_var_num] sub_n_0, INST [tm1, n_var_num] le_0_n', true)
+    | Comb (Const (nb, _), n') ->
+      (match tm1 with
+       | Const ("_0", _) ->
+         (INST [tm2, n_var_num] sub_n_0, INST [tm2, n_var_num] le_0_n', false)
+       | Comb (Const (na, _), m') ->
+         (match m', n' with
+          | Const ("_0", _), Const ("_0", _) ->
+            let i = index_of_name na and j = index_of_name nb in
+            if i >= j then
+              (sub_00_array.(i * maximum + j), le_thm_00_array.(j * maximum + i), true)
+            else
+              (sub_00_array.(j * maximum + i), le_thm_00_array.(i * maximum + j), false)
+          | _ ->
+            (match sub_spine_opt tm1 tm2 with
+             | Some t_tm ->
+               let inst = INST [tm2, n_var_num; t_tm, t_var_num; tm1, m_var_num] in
+               let th_add = nadd tm2 t_tm in
+               (try
+                 (MY_PROVE_HYP th_add (inst sub_lemma1), MY_PROVE_HYP th_add (inst le_lemma), true)
+                with Failure _ -> nsub_le_fallback tm1 tm2)
+             | None ->
+               (match sub_spine_opt tm2 tm1 with
+                | Some t_tm ->
+                  let inst = INST [tm2, m_var_num; t_tm, t_var_num; tm1, n_var_num] in
+                  let th_add = nadd tm1 t_tm in
+                  (try
+                    (MY_PROVE_HYP th_add (inst sub_lemma1), MY_PROVE_HYP th_add (inst le_lemma), false)
+                   with Failure _ -> nsub_le_fallback tm1 tm2)
+                | None -> nsub_le_fallback tm1 tm2)))
+       | _ -> error "nsub_le" [tm1; tm2] [])
+    | _ -> error "nsub_le" [tm1; tm2] [];;
+
+(* ------------------------------------------------------------------------- *)
+(* m * n and n * n: nmul, nsqr                                               *)
+(* ------------------------------------------------------------------------- *)
+
+let mul_0_n = (standardize o prove)
+  (`_0 * n = _0`,
+   ONCE_REWRITE_TAC[zero_const_eq_zero] THEN REWRITE_TAC[MULT]);;
+
+let mul_n_0 = (standardize o ONCE_REWRITE_RULE[MULT_AC]) mul_0_n;;
+
+(* |- F1 _0 * n = n, |- n * F1 _0 = n *)
+let mul_1_n, mul_n_1 =
+  let cond = mk_eq (mk_binop mul_op_num dj0_array.(1) n_var_num, n_var_num) in
+  let th = prove (cond, REWRITE_TAC[def_array.(1); mul_n_0_z] THEN ARITH_TAC) in
+  standardize th, (standardize o ONCE_REWRITE_RULE[MULT_AC]) th;;
+
+(* |- n * F2 _0 = n + n (when base > 2) *)
+let mul_n_2 =
+  if maximum > 2 then
+    standardize (prove (
+      mk_eq (mk_binop mul_op_num n_var_num dj0_array.(2),
+             mk_binop add_op_num n_var_num n_var_num),
+      REWRITE_TAC[def_array.(2); mul_n_0_z] THEN ARITH_TAC))
+  else TRUTH;;
+
+(* |- F0 n * t = F0 (n * t) and |- t * F0 n = F0 (t * n) *)
+let mul_d0_t = (standardize o prove)
+  (mk_eq (mk_binop mul_op_num (mk_comb (d0_const, n_var_num)) t_var_num,
+          mk_comb (d0_const, mk_binop mul_op_num n_var_num t_var_num)),
+   REWRITE_TAC[def_array.(0)] THEN ARITH_TAC);;
+
+let mul_t_d0 = (standardize o ONCE_REWRITE_RULE[MULT_AC]) mul_d0_t;;
+
+(* |- F0 n * F0 n = F0 (F0 (n * n)) *)
+let mul_d0_d0 = (standardize o prove)
+  (mk_eq (mk_binop mul_op_num (mk_comb (d0_const, n_var_num)) (mk_comb (d0_const, n_var_num)),
+          mk_comb (d0_const, mk_comb (d0_const, mk_binop mul_op_num n_var_num n_var_num))),
+   REWRITE_TAC[def_array.(0)] THEN ARITH_TAC);;
+
+let mul_sym = (standardize o prove) (`m * n = n * m:num`, REWRITE_TAC[MULT_AC]);;
+let left_add_distrib = (standardize o SPEC_ALL) LEFT_ADD_DISTRIB;;
+
+(* Single-addition rules for j = base - 1 and j = base / 2 *)
+let mul_n_bmax_rule =
+  if maximum >= 4 then
+    (UNDISCH_ALL o standardize o prove) (
+      mk_imp (mk_eq (mk_binop add_op_num m_var_num t_var_num, mk_comb (d0_const, m_var_num)),
+              mk_eq (mk_binop mul_op_num m_var_num dj0_array.(maximum - 1), t_var_num)),
+      REWRITE_TAC[def_array.(0); def_array.(maximum - 1); mul_n_0_z] THEN ARITH_TAC)
+  else TRUTH;;
+
+let half_base = maximum / 2;;
+let has_half_opt = maximum >= 6 && maximum mod 2 = 0;;
+
+let mul_n_half_rule =
+  if has_half_opt then
+    (UNDISCH_ALL o standardize o prove) (
+      mk_imp (mk_eq (mk_binop add_op_num t_var_num t_var_num, mk_comb (d0_const, m_var_num)),
+              mk_eq (mk_binop mul_op_num m_var_num dj0_array.(half_base), t_var_num)),
+      REWRITE_TAC[def_array.(0); def_array.(half_base); mul_n_0_z] THEN ARITH_TAC)
+  else TRUTH;;
+
+(* Complement rule: a + b = F0(F1 _0), m * b = rb, rb + r = F0 m |- m * a = r *)
+let d0_d1_0 = standardize_tm (mk_comb (d0_const, dj0_array.(1)));;
+let a_var_num = standardize_tm `a:num` and
+    b_var_num = standardize_tm `b:num` and
+    rb_var_num = standardize_tm `rb:num`;;
+
+let mul_comp_rule = (UNDISCH_ALL o standardize o REWRITE_RULE[IMP_CONJ] o prove) (
+  mk_imp (
+    mk_conj (mk_eq (mk_binop add_op_num a_var_num b_var_num, d0_d1_0),
+    mk_conj (mk_eq (mk_binop mul_op_num m_var_num b_var_num, rb_var_num),
+             mk_eq (mk_binop add_op_num rb_var_num r_var_num, mk_comb (d0_const, m_var_num)))),
+    mk_eq (mk_binop mul_op_num m_var_num a_var_num, r_var_num)),
+  REWRITE_TAC[def_array.(0); def_array.(1); mul_n_0_z; ADD_CLAUSES; MULT_CLAUSES] THEN
+  REPEAT STRIP_TAC THEN
+  SUBGOAL_THEN `m * (a + b) = m * a + m * b` MP_TAC THENL
+  [REWRITE_TAC[LEFT_ADD_DISTRIB]; ALL_TAC] THEN
+  ASM_REWRITE_TAC[] THEN ONCE_REWRITE_TAC[MULT_SYM] THEN ASM_ARITH_TAC);;
+
+(* Difference rule: a + b = c, m * c = rc, m * b = rb, rb + r = rc |- m * a = r *)
+let c_var_num = standardize_tm `c:num` and
+    rc_var_num = standardize_tm `rc:num`;;
+
+let mul_diff_rule = (UNDISCH_ALL o standardize o REWRITE_RULE[IMP_CONJ] o prove) (
+  mk_imp (
+    mk_conj (mk_eq (mk_binop add_op_num a_var_num b_var_num, c_var_num),
+    mk_conj (mk_eq (mk_binop mul_op_num m_var_num c_var_num, rc_var_num),
+    mk_conj (mk_eq (mk_binop mul_op_num m_var_num b_var_num, rb_var_num),
+             mk_eq (mk_binop add_op_num rb_var_num r_var_num, rc_var_num)))),
+    mk_eq (mk_binop mul_op_num m_var_num a_var_num, r_var_num)),
+  REPEAT STRIP_TAC THEN
+  SUBGOAL_THEN `m * (a + b) = m * a + m * b` MP_TAC THENL
+  [REWRITE_TAC[LEFT_ADD_DISTRIB]; ALL_TAC] THEN
+  ASM_REWRITE_TAC[] THEN ASM_ARITH_TAC);;
+
+(* Single-digit multiplication table: |- F_i(_0) * F_j(_0) = ... *)
+let mul_array =
+  let r = Array.make (maximum * maximum) TRUTH in
+  let mul_suc_right = standardize (ARITH_RULE `m * SUC n = m * n + m`) in
+  for i = 1 to maximum - 1 do
+    r.(i * maximum + 1) <- INST [dj0_array.(i), n_var_num] mul_n_1;
+    for j = 2 to maximum - 1 do
+      let th = r.(i * maximum + j - 1) in
+      let t_tm = rand (concl th) in
+      let mtm = dj0_array.(i) and rtm = dj0_array.(j - 1) in
+      let th0 = INST [mtm, m_var_num; rtm, n_var_num] mul_suc_right in
+      let th1 = AP_THM (AP_TERM add_op_num th) mtm in
+      let sum_th = nadd t_tm mtm in
+      let th2 = TRANS (TRANS th0 th1) sum_th in
+      let th3 = AP_TERM (mk_comb (mul_op_num, mtm)) suc_0_array.(j - 1) in
+      r.(i * maximum + j) <- TRANS (SYM th3) th2
+    done
+  done;
+  r;;
+
+(* Single-digit right multiplication theorems:
+   |- F_i(m) * F_j(_0) = F_p(F_q(_0) + m * F_j(_0))  (if i * j >= base)
+   |- F_i(m) * F_j(_0) = F_p(m * F_j(_0))            (if i * j < base) *)
+let prod1_lemma = (standardize o prove) (
+  mk_eq (mk_binop mul_op_num (mk_binop add_op_num t_var_num (mk_comb (d0_const, m_var_num))) r_var_num,
+         mk_binop add_op_num (mk_binop mul_op_num t_var_num r_var_num)
+                             (mk_comb (d0_const, mk_binop mul_op_num m_var_num r_var_num))),
+  REWRITE_TAC[RIGHT_ADD_DISTRIB; mul_d0_t]);;
+
+let mul1_right_th_array =
+  let arr = Array.make (maximum * maximum) TRUTH in
+  for i = 1 to maximum - 1 do
+    for j = 1 to maximum - 1 do
+      let idx = i * maximum + j in
+      let bi0 = dj0_array.(i) and bj0 = dj0_array.(j) in
+      let def_i = INST [m_var_num, n_var_num] def_thm_array.(i) in
+      let th0 = AP_THM (AP_TERM mul_op_num def_i) bj0 in
+      let th1 = TRANS th0 (INST [bi0, t_var_num; bj0, r_var_num] prod1_lemma) in
+      let m_bj0 = mk_binop mul_op_num m_var_num bj0 in
+      let rarg = mk_comb (d0_const, m_bj0) in
+      let th2 = TRANS th1 (AP_THM (AP_TERM add_op_num mul_array.(idx)) rarg) in
+      let p = (i * j) mod maximum in
+      let th_final =
+        if i * j < maximum then
+          TRANS th2 (INST [m_bj0, n_var_num] add_0n_array.(p * maximum))
+        else
+          let q = (i * j) / maximum in
+          TRANS th2 (INST [dj0_array.(q), m_var_num; m_bj0, n_var_num] add_array.(p * maximum)) in
+      arr.(idx) <- th_final
+    done
+  done;
+  arr;;
+
+let mul1_low_bit = Array.init (maximum * maximum) (fun idx ->
+  let i = idx / maximum and j = idx mod maximum in
+  const_array.((i * j) mod maximum));;
+
+let mul1_high_idx = Array.init (maximum * maximum) (fun idx ->
+  let i = idx / maximum and j = idx mod maximum in
+  (i * j) / maximum);;
+
+let mul1_plus_high = Array.init (maximum * maximum) (fun idx ->
+  standardize_tm (mk_comb (add_op_num, dj0_array.(mul1_high_idx.(idx)))));;
+
+let mul_d0_right_array = Array.init maximum (fun j ->
+  standardize (INST [dj0_array.(j), t_var_num] mul_d0_t));;
+
+(* Row-by-row multiplication step theorem:
+   |- m * F_j(n) = F0(m * n) + m * F_j(_0) *)
+let mul_step_gen = (standardize o prove) (
+  mk_eq (mk_binop mul_op_num m_var_num (mk_binop add_op_num t_var_num (mk_comb (d0_const, n_var_num))),
+         mk_binop add_op_num (mk_comb (d0_const, mk_binop mul_op_num m_var_num n_var_num))
+                             (mk_binop mul_op_num m_var_num t_var_num)),
+  REWRITE_TAC[LEFT_ADD_DISTRIB; mul_t_d0; ADD_AC]);;
+
+let mul_step_array = Array.init maximum (fun j ->
+  if j = 0 then TRUTH
+  else
+    standardize (TRANS (AP_TERM (mk_comb (mul_op_num, m_var_num)) def_thm_array.(j))
+                       (INST [dj0_array.(j), t_var_num] mul_step_gen)));;
+
+(* Dedicated squaring step theorems: O(base) precomputed theorems *)
+let sqr_step_array = Array.init maximum (fun i ->
+  if i = 0 then mul_d0_d0
+  else
+    let di_m = mk_comb (const_array.(i), m_var_num) in
+    let lhs = mk_binop mul_op_num di_m di_m in
+    let p = (i * i) mod maximum and q = (i * i) / maximum in
+    let mm = mk_binop mul_op_num m_var_num m_var_num in
+    let rhs, defs =
+      if 2 * i < maximum then
+        mk_comb (const_array.(p),
+          mk_binop add_op_num (mk_comb (const_array.(q), mm))
+                              (mk_binop mul_op_num m_var_num dj0_array.(2 * i))),
+        [def_array.(i); def_array.(p); def_array.(q); def_array.(2 * i); mul_n_0_z]
+      else if 2 * i = maximum then
+        mk_comb (const_array.(p),
+          mk_comb (const_array.(q), mk_binop add_op_num mm m_var_num)),
+        [def_array.(i); def_array.(p); def_array.(q); mul_n_0_z]
+      else
+        mk_comb (const_array.(p),
+          mk_binop add_op_num (mk_comb (const_array.(q), mk_binop add_op_num mm m_var_num))
+                              (mk_binop mul_op_num m_var_num dj0_array.(2 * i - maximum))),
+        [def_array.(i); def_array.(p); def_array.(q); def_array.(2 * i - maximum); mul_n_0_z] in
+    standardize (prove (mk_eq (lhs, rhs), REWRITE_TAC defs THEN ARITH_TAC)));;
+
+let sqr_low_bit = Array.init maximum (fun i -> const_array.((i * i) mod maximum));;
+let sqr_high_bit = Array.init maximum (fun i -> const_array.((i * i) / maximum));;
+
+(* Direct digit-spine computation of F0(m) - m *)
+let sub_d0_m m_tm =
+  let rec loop prev a borrow acc =
+    match a with
+    | Const ("_0", _) ->
+      let d = prev - borrow in
+      if d = 0 then strip_and_build acc else strip_and_build (d :: acc)
+    | Comb (Const (na, _), a') ->
+      let cur = index_of_name na in
+      let d = prev - cur - borrow in
+      if d < 0 then loop cur a' 1 ((d + maximum) :: acc)
+      else loop cur a' 0 (d :: acc)
+    | _ -> error "sub_d0_m" [m_tm] [] in
+  loop 0 m_tm 0 [];;
+
+(* Direct digit-spine computation of (base/2) * m for even base *)
+let half_d0_m m_tm =
+  let rec loop a carry acc =
+    match a with
+    | Const ("_0", _) ->
+      if carry = 0 then strip_and_build acc else strip_and_build (carry :: acc)
+    | Comb (Const (na, _), a') ->
+      let cur = index_of_name na in
+      let d = carry + (if cur land 1 = 1 then half_base else 0) in
+      loop a' (cur lsr 1) (d :: acc)
+    | _ -> error "half_d0_m" [m_tm] [] in
+  loop m_tm 0 [];;
+
+(* Core single-digit multiplication: |- arg * F_j(_0) = ... *)
+let rec nmul1_right_core j arg =
+  match arg with
+  | Const ("_0", _) -> INST [dj0_array.(j), n_var_num] mul_0_n
+  | Comb (Const (na, _), m_tm) ->
+    let i = index_of_name na in
+    if i = 0 then
+      let th = INST [m_tm, n_var_num] mul_d0_right_array.(j) in
+      TRANS th (AP_TERM d0_const (nmul1_right_core j m_tm))
+    else
+      let idx = i * maximum + j in
+      (match m_tm with
+       | Const ("_0", _) -> mul_array.(idx)
+       | _ ->
+         let th = INST [m_tm, m_var_num] mul1_right_th_array.(idx) in
+         let th_rec = nmul1_right_core j m_tm in
+         let q = mul1_high_idx.(idx) in
+         let bit_p = mul1_low_bit.(idx) in
+         if q = 0 then
+           TRANS th (AP_TERM bit_p th_rec)
+         else
+           let th2 = AP_TERM mul1_plus_high.(idx) th_rec in
+           let th_add = nadd_digit q (rand (concl th_rec)) in
+           TRANS th (AP_TERM bit_p (TRANS th2 th_add)))
+  | _ -> error "nmul1_right_core" [arg] [];;
+
+(* Optimized single-digit multiplication with single-addition fast paths for >= 3 digits *)
+let nmul1_right j arg =
+  if j = 1 then
+    INST [arg, n_var_num] mul_n_1
+  else
+    match arg with
+    | Const ("_0", _) -> INST [dj0_array.(j), n_var_num] mul_0_n
+    | Comb (Const (na, _), Const ("_0", _)) ->
+      let i = index_of_name na in
+      if i = 0 then
+        TRANS (INST [zero_const, n_var_num] mul_d0_right_array.(j))
+              (AP_TERM d0_const (INST [dj0_array.(j), n_var_num] mul_0_n))
+      else
+        mul_array.(i * maximum + j)
+    | Comb (_, Comb (_, Const ("_0", _))) ->
+      nmul1_right_core j arg
+    | _ ->
+      if j = 2 && maximum > 2 then
+        TRANS (INST [arg, n_var_num] mul_n_2) (nadd arg arg)
+      else if j = maximum - 1 && maximum >= 4 then
+        let res_tm = sub_d0_m arg in
+        let th_add = nadd arg res_tm in
+        let th0 = INST [arg, m_var_num; res_tm, t_var_num] mul_n_bmax_rule in
+        (try MY_PROVE_HYP th_add th0 with Failure _ -> nmul1_right_core j arg)
+      else if has_half_opt && j = half_base then
+        let res_tm = half_d0_m arg in
+        let th_add = nadd res_tm res_tm in
+        let th0 = INST [arg, m_var_num; res_tm, t_var_num] mul_n_half_rule in
+        (try MY_PROVE_HYP th_add th0 with Failure _ -> nmul1_right_core j arg)
+      else
+        nmul1_right_core j arg;;
+
+(* Dedicated O(n^2/2) squaring: |- tm * tm = ... *)
+let rec nsqr tm =
+  match tm with
+  | Const ("_0", _) -> INST [zero_const, n_var_num] mul_0_n
+  | Comb (Const (na, _), m_tm) ->
+    let i = index_of_name na in
+    if i = 0 then
+      let th0 = INST [m_tm, n_var_num] mul_d0_d0 in
+      TRANS th0 (AP_TERM d0_const (AP_TERM d0_const (nsqr m_tm)))
+    else
+      (match m_tm with
+       | Const ("_0", _) -> mul_array.(i * maximum + i)
+       | _ ->
+         let th0 = INST [m_tm, m_var_num] sqr_step_array.(i) in
+         let th_mm = nsqr m_tm in
+         let bp = sqr_low_bit.(i) and bq = sqr_high_bit.(i) in
+         if 2 * i < maximum then
+           let th_l = AP_TERM bq th_mm in
+           let th_r = nmul1_right (2 * i) m_tm in
+           let th_add0 = MK_COMB (AP_TERM add_op_num th_l, th_r) in
+           let th_add = TRANS th_add0 (nadd (rand (concl th_l)) (rand (concl th_r))) in
+           TRANS th0 (AP_TERM bp th_add)
+         else if 2 * i = maximum then
+           let th_mm_m0 = AP_THM (AP_TERM add_op_num th_mm) m_tm in
+           let th_mm_m = TRANS th_mm_m0 (nadd (rand (concl th_mm)) m_tm) in
+           TRANS th0 (AP_TERM bp (AP_TERM bq th_mm_m))
+         else
+           let th_mm_m0 = AP_THM (AP_TERM add_op_num th_mm) m_tm in
+           let th_mm_m = TRANS th_mm_m0 (nadd (rand (concl th_mm)) m_tm) in
+           let th_l = AP_TERM bq th_mm_m in
+           let th_r = nmul1_right (2 * i - maximum) m_tm in
+           let th_add0 = MK_COMB (AP_TERM add_op_num th_l, th_r) in
+           let th_add = TRANS th_add0 (nadd (rand (concl th_l)) (rand (concl th_r))) in
+           TRANS th0 (AP_TERM bp th_add))
+  | _ -> error "nsqr" [tm] [];;
+
+(* ------------------------------------------------------------------------- *)
+(* Karatsuba infrastructure (lazy shift & algebraic combination lemmas)      *)
+(* ------------------------------------------------------------------------- *)
+
+let karatsuba_threshold = ref 20;;
+
+let x0_v = standardize_tm `x0:num` and x1_v = standardize_tm `x1:num`
+and y0_v = standardize_tm `y0:num` and y1_v = standardize_tm `y1:num`
+and p0_v = standardize_tm `p0:num` and p1_v = standardize_tm `p1:num`
+and p2_v = standardize_tm `p2:num` and pm_v = standardize_tm `pm:num`
+and p02_v = standardize_tm `p02:num` and hi_v = standardize_tm `hi:num`
+and res_v = standardize_tm `res:num` and s_v = standardize_tm `s:num`;;
+
+let karatsuba_base = prove (
+  `x0 * y0 = p0 /\ x1 * y1 = p2 /\ (x0 + x1) * (y0 + y1) = pm /\
+   p0 + p2 = p02 /\ p02 + p1 = pm /\ p1 + s * p2 = hi /\ p0 + s * hi = res ==>
+   (x0 + s * x1) * (y0 + s * y1) = res`,
+  REPEAT STRIP_TAC THEN
+  SUBGOAL_THEN `p1 = x0 * y1 + x1 * y0` ASSUME_TAC THENL
+  [UNDISCH_TAC `p02 + p1 = pm` THEN
+   MAP_EVERY (fun t -> UNDISCH_TAC t THEN DISCH_THEN (SUBST1_TAC o SYM))
+     [`p0 + p2 = p02`; `(x0 + x1) * (y0 + y1) = pm`; `x0 * y0 = p0`; `x1 * y1 = p2`] THEN
+   REWRITE_TAC[LEFT_ADD_DISTRIB; RIGHT_ADD_DISTRIB] THEN ARITH_TAC;
+   MAP_EVERY (fun t -> UNDISCH_TAC t THEN DISCH_THEN (SUBST1_TAC o SYM))
+     [`p0 + s * hi = res`; `p1 + s * p2 = hi`; `x0 * y0 = p0`; `x1 * y1 = p2`] THEN
+   ASM_REWRITE_TAC[LEFT_ADD_DISTRIB; RIGHT_ADD_DISTRIB; MULT_ASSOC] THEN
+   REWRITE_TAC[MULT_AC; ADD_AC]]);;
+
+let shift_mul_cache = Hashtbl.create 32;;
+
+let rec get_shift_mul h =
+  try Hashtbl.find shift_mul_cache h
+  with Not_found ->
+    let th =
+      if h = 1 then d0_explicit
+      else
+        let prev = get_shift_mul (h - 1) in
+        let th1 = AP_TERM d0_const prev in
+        let th2 = INST [rand (concl prev), n_var_num] d0_explicit in
+        let th3 = TRANS th1 th2 in
+        let rhs = rand (concl th3) in
+        let b_tm, rest = dest_comb rhs in
+        let b_tm = rand b_tm in
+        let bh_tm, _ = dest_comb rest in
+        let bh_tm = rand bh_tm in
+        let assoc = INST [b_tm, m_var_num; bh_tm, n_var_num; n_var_num, p_var_num] (SPEC_ALL MULT_ASSOC) in
+        let mul_c = NUM_MULT_CONV (mk_binop mul_op_num b_tm bh_tm) in
+        standardize (TRANS th3 (TRANS assoc (AP_THM (AP_TERM mul_op_num mul_c) n_var_num))) in
+    Hashtbl.add shift_mul_cache h th;
+    th;;
+
+let karatsuba_h_cache = Hashtbl.create 32;;
+
+let get_karatsuba_h h =
+  try Hashtbl.find karatsuba_h_cache h
+  with Not_found ->
+    let sh_th = get_shift_mul h in
+    let sh_const = lhand (rand (concl sh_th)) in
+    let th0 = INST [sh_const, s_v] karatsuba_base in
+    let th1 = REWRITE_RULE[GSYM sh_th] th0 in
+    let th2 = (UNDISCH_ALL o standardize o REWRITE_RULE[IMP_CONJ]) th1 in
+    Hashtbl.add karatsuba_h_cache h th2;
+    th2;;
+
+let rec mk_shift h tm =
+  if h <= 0 then tm
+  else mk_comb (d0_const, mk_shift (h - 1) tm);;
+
+(* O(h) split_at h tm -> (lo, hi, F0^h(hi), |- lo + F0^h(hi) = tm) *)
+let rec split_at h tm =
+  if h = 0 then
+    zero_const, tm, tm, INST [tm, n_var_num] add_0_n
+  else
+    match tm with
+    | Const ("_0", _) ->
+      let sh = mk_shift h zero_const in
+      zero_const, zero_const, sh, INST [sh, n_var_num] add_0_n
+    | Comb (Const (na, _) as d_tm, rest) ->
+      let i = index_of_name na in
+      if h = 1 then
+        let sh_hi = mk_comb (d0_const, rest) in
+        if i = 0 then
+          zero_const, rest, sh_hi, INST [sh_hi, n_var_num] add_0_n
+        else
+          dj0_array.(i), rest, sh_hi, INST [rest, n_var_num] add_0n_array.(i * maximum)
+      else
+        let lo', hi, sh_hi', th_rec = split_at (h - 1) rest in
+        let sh_hi = mk_comb (d0_const, sh_hi') in
+        (match lo' with
+         | Const ("_0", _) ->
+           if i = 0 then
+             zero_const, hi, sh_hi, INST [sh_hi, n_var_num] add_0_n
+           else
+             dj0_array.(i), hi, sh_hi, INST [sh_hi', n_var_num] add_0n_array.(i * maximum)
+         | _ ->
+           let lo = mk_comb (d_tm, lo') in
+           let th0 = INST [lo', m_var_num; sh_hi', n_var_num] add_array.(i * maximum) in
+           lo, hi, sh_hi, TRANS th0 (AP_TERM d_tm th_rec))
+    | _ -> error "split_at" [tm] [];;
+
+(* Specialized shifted addition: add_shift h a b -> (F0^h(b), |- a + F0^h(b) = res) *)
+let rec add_shift h a b =
+  if h = 0 then
+    b, nadd a b
+  else
+    match a with
+    | Const ("_0", _) ->
+      let sh_b = mk_shift h b in
+      sh_b, INST [sh_b, n_var_num] add_0_n
+    | Comb (Const (na, _), Const ("_0", _)) ->
+      let i = index_of_name na in
+      let sh_b' = mk_shift (h - 1) b in
+      let sh_b = mk_comb (d0_const, sh_b') in
+      sh_b, INST [sh_b', n_var_num] add_0n_array.(i * maximum)
+    | Comb (Const (na, _) as d_tm, a') ->
+      let i = index_of_name na in
+      let sh_b', th_rec = add_shift (h - 1) a' b in
+      let sh_b = mk_comb (d0_const, sh_b') in
+      let th0 = INST [a', m_var_num; sh_b', n_var_num] add_array.(i * maximum) in
+      sh_b, TRANS th0 (AP_TERM d_tm th_rec)
+    | _ -> error "add_shift" [a; b] [];;
+
+(* ------------------------------------------------------------------------- *)
+(* Row-by-row multiplication with ascending digit cache (sum & complement)   *)
+(* ------------------------------------------------------------------------- *)
+
+(* Collect distinct nonzero digits of rarg, ordering cheap special digits first
+   then ascending so pairwise sums, complements, and differences hit the cache *)
+let collect_digits_ordered rarg =
+  let rec loop acc = function
+    | Const ("_0", _) -> acc
+    | Comb (Const (nb, _), n_tm) ->
+      let j = index_of_name nb in
+      if j = 0 || List.mem j acc then loop acc n_tm
+      else loop (j :: acc) n_tm
+    | tm -> error "collect_digits_ordered" [tm] [] in
+  let ds = List.sort compare (loop [] rarg) in
+  let is_special j =
+    j = 1 || (j = 2 && maximum > 2) ||
+    (has_half_opt && j = half_base) ||
+    (j = maximum - 1 && maximum >= 4) in
+  let sp, rest = List.partition is_special ds in
+  sp @ rest;;
+
+(* Given already-computed cache of (digit, |- larg * F_d(_0) = res),
+   compute |- larg * F_j(_0) = res using a single nadd when possible *)
+let compute_mul1_with_cache larg larg_size j cache =
+  if j = 1 then
+    INST [larg, n_var_num] mul_n_1
+  else if j = 2 && maximum > 2 then
+    TRANS (INST [larg, n_var_num] mul_n_2) (nadd larg larg)
+  else if j = maximum - 1 && maximum >= 4 then
+    let res_tm = sub_d0_m larg in
+    let th_add = nadd larg res_tm in
+    let th0 = INST [larg, m_var_num; res_tm, t_var_num] mul_n_bmax_rule in
+    (try MY_PROVE_HYP th_add th0 with Failure _ -> nmul1_right_core j larg)
+  else if has_half_opt && j = half_base then
+    let res_tm = half_d0_m larg in
+    let th_add = nadd res_tm res_tm in
+    let th0 = INST [larg, m_var_num; res_tm, t_var_num] mul_n_half_rule in
+    (try MY_PROVE_HYP th_add th0 with Failure _ -> nmul1_right_core j larg)
+  else if larg_size >= 4 then
+    (* 1. Check if j = a + b for cached a, b (including a = b or a = 1) *)
+    let rec find_pair = function
+      | [] -> None
+      | (a, th_a) :: rest ->
+        let b = j - a in
+        if b <= 0 then find_pair rest
+        else if b = a then Some (a, th_a, a, th_a)
+        else
+          (match List.assoc_opt b rest with
+           | Some th_b -> Some (a, th_a, b, th_b)
+           | None -> find_pair rest) in
+    let pair_opt =
+      match List.assoc_opt (j - 1) cache with
+      | Some th_b -> Some (1, INST [larg, n_var_num] mul_n_1, j - 1, th_b)
+      | None -> find_pair cache in
+    match pair_opt with
+    | Some (a, th_a, b, th_b) ->
+      let th_ab = add_00_array.(a * maximum + b) in
+      let th1 = AP_TERM (mk_comb (mul_op_num, larg)) (SYM th_ab) in
+      let th2 = INST [larg, m_var_num; dj0_array.(a), n_var_num; dj0_array.(b), p_var_num] left_add_distrib in
+      let th3 = MK_COMB (AP_TERM add_op_num th_a, th_b) in
+      let th4 = nadd (rand (concl th_a)) (rand (concl th_b)) in
+      TRANS (TRANS th1 th2) (TRANS th3 th4)
+    | None ->
+      (* 2. Check complement: maximum - j in cache *)
+      let comp = maximum - j in
+      (match List.assoc_opt comp cache with
+       | Some th_b ->
+         let rb = rand (concl th_b) in
+         let d0_larg = mk_comb (d0_const, larg) in
+         (match sub_spine_opt d0_larg rb with
+          | Some r_tm ->
+            let th_add = nadd rb r_tm in
+            let th_ab = add_00_array.(j * maximum + comp) in
+            let th0 = INST [dj0_array.(j), a_var_num; dj0_array.(comp), b_var_num;
+                            larg, m_var_num; rb, rb_var_num; r_tm, r_var_num] mul_comp_rule in
+            (try MY_PROVE_HYP th_add (MY_PROVE_HYP th_b (MY_PROVE_HYP th_ab th0))
+             with Failure _ -> nmul1_right_core j larg)
+          | None -> nmul1_right_core j larg)
+       | None ->
+         (* 3. Check difference: c - b = j where c, b in {1} U cache *)
+         let diff_opt =
+           match List.assoc_opt (j + 1) cache with
+           | Some th_c -> Some (j + 1, th_c, 1, INST [larg, n_var_num] mul_n_1)
+           | None ->
+             let rec find_diff = function
+               | [] -> None
+               | (c, th_c) :: rest ->
+                 let b = c - j in
+                 if b <= 0 then find_diff rest
+                 else
+                   (match List.assoc_opt b cache with
+                    | Some th_b -> Some (c, th_c, b, th_b)
+                    | None -> find_diff rest) in
+             find_diff cache in
+         (match diff_opt with
+          | Some (c, th_c, b, th_b) ->
+            let rc = rand (concl th_c) and rb = rand (concl th_b) in
+            (match sub_spine_opt rc rb with
+             | Some r_tm ->
+               let th_add = nadd rb r_tm in
+               let th_ab = add_00_array.(j * maximum + b) in
+               let th0 = INST [dj0_array.(j), a_var_num; dj0_array.(b), b_var_num;
+                               dj0_array.(c), c_var_num; larg, m_var_num;
+                               rc, rc_var_num; rb, rb_var_num; r_tm, r_var_num] mul_diff_rule in
+               (try MY_PROVE_HYP th_add (MY_PROVE_HYP th_b (MY_PROVE_HYP th_c (MY_PROVE_HYP th_ab th0)))
+                with Failure _ -> nmul1_right_core j larg)
+             | None -> nmul1_right_core j larg)
+          | None -> nmul1_right_core j larg))
+  else
+    nmul1_right_core j larg;;
+
+(* Dedicated 2-digit right multiplication: |- larg * F_j(F_l(_0)) = ... *)
+let nmul2_right larg j l =
+  let th0 = INST [larg, m_var_num; dj0_array.(l), n_var_num] mul_step_array.(j) in
+  let th_mul0 = nmul1_right l larg in
+  let th_b0 = AP_TERM d0_const th_mul0 in
+  let th_mul1 = if j = l then th_mul0 else nmul1_right j larg in
+  let add_th = MK_COMB (AP_TERM add_op_num th_b0, th_mul1) in
+  let add = TRANS add_th (nadd_d0 (rand (concl th_mul0)) (rand (concl th_mul1))) in
+  TRANS th0 add;;
+
+let mul_row larg larg_size rarg rarg_size =
+  (* Pre-populate digit cache when beneficial *)
+  let cache =
+    if rarg_size >= 3 && larg_size >= 4 then
+      let digits = collect_digits_ordered rarg in
+      let tbl = ref [] in
+      List.iter (fun j ->
+        let th = compute_mul1_with_cache larg larg_size j !tbl in
+        tbl := (j, th) :: !tbl
+      ) digits;
+      !tbl
+    else
+      [] in
+  let local_cache = ref cache in
+  let get_mul1 j =
+    match List.assoc_opt j !local_cache with
+    | Some th -> th
+    | None ->
+      let th = nmul1_right j larg in
+      local_cache := (j, th) :: !local_cache;
+      th in
+  let rec loop r =
+    match r with
+    | Const ("_0", _) -> INST [larg, n_var_num] mul_n_0
+    | Comb (Const (nb, _), n_tm) ->
+      let j = index_of_name nb in
+      if j = 0 then
+        let th = INST [larg, t_var_num; n_tm, n_var_num] mul_t_d0 in
+        TRANS th (AP_TERM d0_const (loop n_tm))
+      else
+        (match n_tm with
+         | Const ("_0", _) -> get_mul1 j
+         | _ ->
+           let th0 = INST [larg, m_var_num; n_tm, n_var_num] mul_step_array.(j) in
+           let th_mul0 = loop n_tm in
+           let th_b0 = AP_TERM d0_const th_mul0 in
+           let th_mul1 = get_mul1 j in
+           let add_th = MK_COMB (AP_TERM add_op_num th_b0, th_mul1) in
+           let add = TRANS add_th (nadd_d0 (rand (concl th_mul0)) (rand (concl th_mul1))) in
+           TRANS th0 add)
+    | _ -> error "mul_row" [larg; r] [] in
+  loop rarg;;
+
+let rec nmul larg rarg =
+  if eq_nat_tm larg rarg then
+    nsqr larg
+  else
+    match larg with
+    | Const ("_0", _) -> INST [rarg, n_var_num] mul_0_n
+    | Comb (Const (na, _), m_tm) ->
+      let i = index_of_name na in
+      if i = 0 then
+        let th = INST [rarg, t_var_num; m_tm, n_var_num] mul_d0_t in
+        TRANS th (AP_TERM d0_const (nmul m_tm rarg))
+      else
+        (match rarg with
+         | Const ("_0", _) -> INST [larg, n_var_num] mul_n_0
+         | Comb (Const (nb, _), n_tm) ->
+           let j = index_of_name nb in
+           if j = 0 then
+             let th = INST [larg, t_var_num; n_tm, n_var_num] mul_t_d0 in
+             TRANS th (AP_TERM d0_const (nmul larg n_tm))
+           else
+             (match n_tm with
+              | Const ("_0", _) ->
+                (match m_tm with
+                 | Const ("_0", _) -> mul_array.(i * maximum + j)
+                 | _ -> nmul1_right j larg)
+              | Comb (Const (nl, _), Const ("_0", _)) ->
+                (match m_tm with
+                 | Const ("_0", _) ->
+                   if i = 1 then INST [rarg, n_var_num] mul_1_n
+                   else TRANS (INST [larg, m_var_num; rarg, n_var_num] mul_sym) (nmul1_right i rarg)
+                 | _ ->
+                   let l = index_of_name nl in
+                   if l > 0 then nmul2_right larg j l
+                   else mul_row larg (size_nat larg) rarg 2)
+              | _ ->
+                (match m_tm with
+                 | Const ("_0", _) ->
+                   if i = 1 then INST [rarg, n_var_num] mul_1_n
+                   else TRANS (INST [larg, m_var_num; rarg, n_var_num] mul_sym) (nmul1_right i rarg)
+                 | Comb (Const (nk, _), Const ("_0", _)) ->
+                   let k = index_of_name nk in
+                   if k > 0 then
+                     TRANS (INST [larg, m_var_num; rarg, n_var_num] mul_sym) (nmul2_right rarg i k)
+                   else
+                     let sl = 2 and sr = size_nat rarg in
+                     TRANS (INST [larg, m_var_num; rarg, n_var_num] mul_sym) (mul_row rarg sr larg sl)
+                 | _ ->
+                   let sl = size_nat larg and sr = size_nat rarg in
+                   let smin = if sl < sr then sl else sr in
+                   let smax = if sl < sr then sr else sl in
+                   if smin >= !karatsuba_threshold && smax <= 2 * smin then
+                     let h = smax / 2 in
+                     let h = if h >= smin then smin - 1 else h in
+                     let x0, x1, _, th_x = split_at h larg in
+                     let y0, y1, _, th_y = split_at h rarg in
+                     let th_p0 = nmul x0 y0 in
+                     let th_p2 = nmul x1 y1 in
+                     let th_sx = nadd x0 x1 in
+                     let th_sy = nadd y0 y1 in
+                     let sx = rand (concl th_sx) and sy = rand (concl th_sy) in
+                     let th_pm0 = MK_COMB (AP_TERM mul_op_num th_sx, th_sy) in
+                     let th_pm = TRANS th_pm0 (nmul sx sy) in
+                     let p0 = rand (concl th_p0) and p2 = rand (concl th_p2) and pm = rand (concl th_pm) in
+                     let th_p02 = nadd p0 p2 in
+                     let p02 = rand (concl th_p02) in
+                     let p1 =
+                       match sub_spine_opt pm p02 with
+                       | Some t -> t
+                       | None -> mk_nat (dest_nat pm -/ dest_nat p02) in
+                     let th_p02_p1 = nadd p02 p1 in
+                     let _, th_hi = add_shift h p1 p2 in
+                     let hi = rand (concl th_hi) in
+                     let _, th_res = add_shift h p0 hi in
+                     let res = rand (concl th_res) in
+                     let kth = INST [x0, x0_v; x1, x1_v; y0, y0_v; y1, y1_v;
+                                     p0, p0_v; p1, p1_v; p2, p2_v; pm, pm_v;
+                                     p02, p02_v; hi, hi_v; res, res_v]
+                                    (get_karatsuba_h h) in
+                     let th_k =
+                       MY_PROVE_HYP th_res (MY_PROVE_HYP th_hi
+                       (MY_PROVE_HYP th_p02_p1 (MY_PROVE_HYP th_p02
+                       (MY_PROVE_HYP th_pm (MY_PROVE_HYP th_p2 (MY_PROVE_HYP th_p0 kth)))))) in
+                     let th_lhs = SYM (MK_COMB (AP_TERM mul_op_num th_x, th_y)) in
+                     TRANS th_lhs th_k
+                   else if sl < sr then
+                     TRANS (INST [larg, m_var_num; rarg, n_var_num] mul_sym)
+                           (mul_row rarg sr larg sl)
+                   else
+                     mul_row larg sl rarg sr))
+         | _ -> error "nmul" [larg; rarg] [])
+    | _ -> error "nmul" [larg; rarg] [];;
+
+(* ------------------------------------------------------------------------- *)
+(* m DIV n: ndiv                                                             *)
+(* ------------------------------------------------------------------------- *)
+
+let div_uniq =
+  (UNDISCH_ALL o standardize o
+   PURE_ONCE_REWRITE_RULE[ARITH_RULE `a < b <=> (a < b:num <=> T)`] o
+   ONCE_REWRITE_RULE[ARITH_RULE `m = q * n + r <=> q * n + r = m:num`] o
+   REWRITE_RULE[GSYM IMP_IMP] o SPEC_ALL) DIV_UNIQ;;
+
+(* (m < n <=> T) |- m DIV n = _0 *)
+let div_lt_thm =
+  let th0 = INST [zero_const, q_var_num; m_var_num, r_var_num] div_uniq in
+  let hyp1 = TRANS (AP_THM (AP_TERM add_op_num mul_0_n) m_var_num)
+                   (INST [m_var_num, n_var_num] add_0_n) in
+  standardize (MY_PROVE_HYP hyp1 th0);;
+
+(* (0 < n <=> T), q * n = m |- m DIV n = q *)
+let div_exact_thm =
+  let th0 = INST [zero_const, r_var_num] div_uniq in
+  let qn_tm = mk_binop mul_op_num q_var_num n_var_num in
+  let eq_th = ASSUME (mk_eq (qn_tm, m_var_num)) in
+  let hyp1 = TRANS (INST [qn_tm, n_var_num] add_n_0) eq_th in
+  let th1 = MY_PROVE_HYP hyp1 th0 in
+  (* Rewrite _0 < n to 0 < n so ngt0 discharges it directly *)
+  let z_lt = prove (`(_0 < n <=> T) <=> (0 < n <=> T)`,
+    REWRITE_TAC[NUMERAL]) in
+  let hyp_gt0 = EQ_MP (SYM z_lt) (ASSUME `0 < n <=> T`) in
+  standardize (MY_PROVE_HYP hyp_gt0 th1);;
+
+(* |- m DIV F1 _0 = m *)
+let div_1_thm = (standardize o prove) (
+  mk_eq (mk_binop div_op_num m_var_num dj0_array.(1), m_var_num),
+  REWRITE_TAC[def_array.(1); mul_n_0_z; ADD_CLAUSES; DIV_1]);;
+
+(* (0 < n <=> T) |- n DIV n = F1 _0 *)
+let div_refl_thm = (UNDISCH_ALL o standardize o prove) (
+  mk_imp (`0 < n <=> T`, mk_eq (mk_binop div_op_num n_var_num n_var_num, dj0_array.(1))),
+  REWRITE_TAC[def_array.(1); mul_n_0_z; ADD_CLAUSES] THEN
+  DISCH_THEN (fun th -> MATCH_MP_TAC DIV_REFL THEN MP_TAC th THEN ARITH_TAC));;
+
+let ndiv_prove m_tm n_tm q_tm r_tm is_zero_r =
+  let qn_th = nmul q_tm n_tm in
+  if is_zero_r then
+    let th_gt0, _ = ngt0 n_tm in
+    let th0 = INST [n_tm, n_var_num; m_tm, m_var_num; q_tm, q_var_num] div_exact_thm in
+    MY_PROVE_HYP qn_th (MY_PROVE_HYP th_gt0 th0)
+  else
+    let qn_tm = rand (concl qn_th) in
+    let qnr_th = nadd qn_tm r_tm in
+    let th1 = TRANS (AP_THM (AP_TERM add_op_num qn_th) r_tm) qnr_th in
+    let th2, _ = nlt_rec r_tm n_tm in
+    let th0 = INST [r_tm, r_var_num; n_tm, n_var_num; m_tm, m_var_num; q_tm, q_var_num] div_uniq in
+    MY_PROVE_HYP th1 (MY_PROVE_HYP th2 th0);;
+
+let ndiv m_tm n_tm =
+  (* Fast special cases: n = 1, m = n *)
+  if eq_nat_tm m_tm n_tm then
+    let th_gt0, flag = ngt0 n_tm in
+    if flag then MY_PROVE_HYP th_gt0 (INST [n_tm, n_var_num] div_refl_thm)
+    else error "ndiv: division by zero" [m_tm; n_tm] []
+  else
+    match n_tm with
+    | Comb (Const (nb, _), Const ("_0", _)) when index_of_name nb = 1 ->
+      INST [m_tm, m_var_num] div_1_thm
+    | _ ->
+      (* Native 64-bit int fast path when both operands fit in chunk_k digits *)
+      let m_lo, m_rest = dest_chunk m_tm chunk_k 0 1 in
+      let n_lo, n_rest = dest_chunk n_tm chunk_k 0 1 in
+      match m_rest, n_rest with
+      | Const ("_0", _), Const ("_0", _) ->
+        if n_lo = 0 then error "ndiv: division by zero" [m_tm; n_tm] []
+        else if m_lo < n_lo then
+          let th_lt, _ = nlt_rec m_tm n_tm in
+          MY_PROVE_HYP th_lt (INST [m_tm, m_var_num; n_tm, n_var_num] div_lt_thm)
+        else if m_lo = n_lo && m_tm = n_tm then
+          let th_gt0, _ = ngt0 n_tm in
+          MY_PROVE_HYP th_gt0 (INST [n_tm, n_var_num] div_refl_thm)
+        else
+          let q = m_lo / n_lo in
+          let r = m_lo - q * n_lo in
+          let q_tm = mk_small_nat_raw q in
+          if r = 0 then
+            ndiv_prove m_tm n_tm q_tm zero_const true
+          else
+            ndiv_prove m_tm n_tm q_tm (mk_small_nat_raw r) false
+      | _ ->
+        let m_big =
+          match m_rest with
+          | Const ("_0", _) -> Big_int.big_int_of_int m_lo
+          | _ -> Big_int.add_int_big_int m_lo (Big_int.mult_big_int chunk_big (dest_nat_big m_rest)) in
+        let n_big =
+          match n_rest with
+          | Const ("_0", _) -> Big_int.big_int_of_int n_lo
+          | _ -> Big_int.add_int_big_int n_lo (Big_int.mult_big_int chunk_big (dest_nat_big n_rest)) in
+        if Big_int.sign_big_int n_big = 0 then
+          error "ndiv: division by zero" [m_tm; n_tm] []
+        else if Big_int.lt_big_int m_big n_big then
+          let th_lt, _ = nlt_rec m_tm n_tm in
+          MY_PROVE_HYP th_lt (INST [m_tm, m_var_num; n_tm, n_var_num] div_lt_thm)
+        else if Big_int.eq_big_int m_big n_big && m_tm = n_tm then
+          let th_gt0, _ = ngt0 n_tm in
+          MY_PROVE_HYP th_gt0 (INST [n_tm, n_var_num] div_refl_thm)
+        else
+          let q_big, r_big = Big_int.quomod_big_int m_big n_big in
+          let q_tm = mk_nat_big q_big in
+          if Big_int.sign_big_int r_big = 0 then
+            ndiv_prove m_tm n_tm q_tm zero_const true
+          else
+            ndiv_prove m_tm n_tm q_tm (mk_nat_big r_big) false;;
+
+(* ------------------------------------------------------------------------- *)
+(* Stats & cache infrastructure (compatible with Nat_arith_sig)              *)
+(* ------------------------------------------------------------------------- *)
+
+type stat_data = {
+  mutable counter : int;
+  table_size : unit -> int;
+};;
+
+let new_stat_data, stat_data =
+  let stats = ref [] in
+  let create_stat (name : string) table_size =
+    let data = { counter = 0; table_size = table_size } in
+    stats := (name, data) :: !stats;
+    data in
+  create_stat, (fun () -> !stats);;
+
+let reset_stats () =
+  List.iter (fun (_, data) -> data.counter <- 0) (stat_data ());;
+
+let print_stats () =
+  let pp (name, data) =
+    sprintf "%s\t = %d\t (hash = %d)" name data.counter (data.table_size ()) in
+  let strs = map pp (stat_data ()) in
+  print_string (String.concat "\n" strs);;
+
+let le_table = Hashtbl.create !Arith_options.init_cache_size and
+    lt_table = Hashtbl.create !Arith_options.init_cache_size and
+    add_table = Hashtbl.create !Arith_options.init_cache_size and
+    sub_table = Hashtbl.create !Arith_options.init_cache_size and
+    sub_le_table = Hashtbl.create !Arith_options.init_cache_size and
+    mul_table = Hashtbl.create !Arith_options.init_cache_size and
+    div_table = Hashtbl.create !Arith_options.init_cache_size;;
+
+let _ =
+  ignore (new_stat_data "le" (fun () -> Hashtbl.length le_table));
+  ignore (new_stat_data "lt" (fun () -> Hashtbl.length lt_table));
+  ignore (new_stat_data "add" (fun () -> Hashtbl.length add_table));
+  ignore (new_stat_data "sub" (fun () -> Hashtbl.length sub_table));
+  ignore (new_stat_data "sub_le" (fun () -> Hashtbl.length sub_le_table));
+  ignore (new_stat_data "mul" (fun () -> Hashtbl.length mul_table));
+  ignore (new_stat_data "div" (fun () -> Hashtbl.length div_table));;
+
+let reset_cache () =
+  Hashtbl.clear le_table;
+  Hashtbl.clear lt_table;
+  Hashtbl.clear add_table;
+  Hashtbl.clear sub_table;
+  Hashtbl.clear sub_le_table;
+  Hashtbl.clear mul_table;
+  Hashtbl.clear div_table;;
+
+let nat_tm_hash tm =
+  let buf = Buffer.create 32 in
+  let rec loop = function
+    | Const ("_0", _) -> ()
+    | Comb (Const (name, _), n_tm) ->
+      Buffer.add_string buf name;
+      loop n_tm
+    | t -> error "nat_tm_hash" [t] [] in
+  loop tm;
+  Buffer.contents buf;;
+
+end;;

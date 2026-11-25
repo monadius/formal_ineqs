@@ -11,7 +11,7 @@ import sys
 import random
 
 if len(sys.argv) != 3:
-    print "Usage: gen_nat_data length n"
+    print("Usage: gen_nat_data length n")
     sys.exit(1)
 
 length = int(sys.argv[1])
@@ -24,4 +24,4 @@ a = 10 ** length
 b = 10 ** (length + 1) - 1
 
 for i in range(0, n):
-    print random.randint(a, b)
+    print(random.randint(a, b))

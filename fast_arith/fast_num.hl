@@ -21,6 +21,7 @@
 (*      * specialized single-digit and D0-shifted addition helpers            *)
 (*      * O(n^1.585) Karatsuba multiplication for large operands              *)
 (*  - Native 64-bit int division fast path & special cases in ndiv            *)
+(*  - Fast division by 2 (ndiv2) via digit-spine halving & unary doubling     *)
 (* -------------------------------------------------------------------------- *)
 
 module type Fast_num_sig =
@@ -100,8 +101,12 @@ module type Fast_num_sig =
     val nmul : term -> term -> thm
     (* Given numeral m, proves |- m * m = r *)
     val nsqr : term -> thm
+    (* Given numeral m, proves |- 2 * m = r (O(1) for base = 2, O(n) via unary doubling otherwise) *)
+    val ndouble : term -> thm
     (* Given numerals m, n (with n > 0), proves |- m DIV n = q; fails if n = 0 *)
     val ndiv : term -> term -> thm
+    (* Given numeral m, proves |- m DIV 2 = q (O(1) for base = 2, O(n) via unary doubling otherwise) *)
+    val ndiv2 : term -> thm
 
     (* Minimum digit length of the shorter operand to trigger Karatsuba in nmul (when smax <= 2 * smin) *)
     val karatsuba_threshold : int ref
@@ -1412,6 +1417,131 @@ let nadd_d0 r0 r1 =
   | _ -> error "nadd_d0" [r0; r1] [];;
 
 (* ------------------------------------------------------------------------- *)
+(* Fast unary doubling: ndouble (|- 2 * n = r)                               *)
+(* ------------------------------------------------------------------------- *)
+
+let half_base = maximum / 2;;
+let two_num = standardize_tm `2`;;
+
+(* Private unary helper constants keep each step theorem to 2 Combs per side
+   and 1 variable occurrence, minimizing INST/vsubst and TRANS overhead.
+   They are discharged by MY_PROVE_HYP and never appear in public results. *)
+let fast_dbl_def = new_basic_definition `fast_dbl = \n. n + n`;;
+let fast_cdbl_def = new_basic_definition `fast_cdbl = \n. SUC (n + n)`;;
+
+let fast_dbl_const = standardize_tm `fast_dbl` and
+    fast_cdbl_const = standardize_tm `fast_cdbl`;;
+
+(* |- fast_dbl n = n + n  and  |- fast_cdbl n = SUC (n + n) *)
+let fast_dbl_eq =
+  let th = AP_THM fast_dbl_def n_var_num in
+  standardize (TRANS th (BETA (rand (concl th))));;
+
+let fast_cdbl_eq =
+  let th = AP_THM fast_cdbl_def n_var_num in
+  standardize (TRANS th (BETA (rand (concl th))));;
+
+let dbl_zero =
+  standardize (TRANS (INST [zero_const, n_var_num] fast_dbl_eq)
+                     (INST [zero_const, n_var_num] add_0_n));;
+
+let cdbl_zero =
+  standardize (TRANS (INST [zero_const, n_var_num] fast_cdbl_eq)
+                     (TRANS (INST [zero_const, n_var_num] cadd_0_n) suc_0));;
+
+let dbl_bit_array = Array.init maximum (fun i ->
+  const_array.(if i < half_base then 2 * i else 2 * i - maximum));;
+
+let cdbl_bit_array = Array.init maximum (fun i ->
+  const_array.(if i < half_base then 2 * i + 1 else 2 * i + 1 - maximum));;
+
+(* Because base is even, both 2*i and 2*i+1 carry iff i >= half_base.
+   |- fast_dbl (F_i n) = F_{(2i) mod B} (fast_dbl n | fast_cdbl n) *)
+let dbl_array = Array.init maximum (fun i ->
+  let fi_n = mk_comb (const_array.(i), n_var_num) in
+  let th0 = INST [fi_n, n_var_num] fast_dbl_eq in
+  let th1 = INST [n_var_num, m_var_num] add_array.(i * maximum + i) in
+  let inner_sym = SYM (if i >= half_base then fast_cdbl_eq else fast_dbl_eq) in
+  standardize (TRANS (TRANS th0 th1) (AP_TERM dbl_bit_array.(i) inner_sym)));;
+
+(* |- fast_cdbl (F_i n) = F_{(2i+1) mod B} (fast_dbl n | fast_cdbl n) *)
+let cdbl_array = Array.init maximum (fun i ->
+  let fi_n = mk_comb (const_array.(i), n_var_num) in
+  let th0 = INST [fi_n, n_var_num] fast_cdbl_eq in
+  let th1 = INST [n_var_num, m_var_num] cadd_array.(i * maximum + i) in
+  let inner_sym = SYM (if i >= half_base then fast_cdbl_eq else fast_dbl_eq) in
+  standardize (TRANS (TRANS th0 th1) (AP_TERM cdbl_bit_array.(i) inner_sym)));;
+
+let dbl_0_array = Array.init maximum (fun i ->
+  let th = INST [zero_const, n_var_num] dbl_array.(i) in
+  standardize (TRANS th (AP_TERM dbl_bit_array.(i)
+    (if i >= half_base then cdbl_zero else dbl_zero))));;
+
+let cdbl_0_array = Array.init maximum (fun i ->
+  let th = INST [zero_const, n_var_num] cdbl_array.(i) in
+  standardize (TRANS th (AP_TERM cdbl_bit_array.(i)
+    (if i >= half_base then cdbl_zero else dbl_zero))));;
+
+(* Internal mutually recursive single-variable doubling:
+   ndouble_core proves |- fast_dbl tm = res, ncdouble_core proves |- fast_cdbl tm = res. *)
+let rec ndouble_core tm =
+  match tm with
+  | Const ("_0", _) -> dbl_zero
+  | Comb (Const (na, _), Const ("_0", _)) ->
+    dbl_0_array.(index_of_name na)
+  | Comb (Const (na, _), n_tm) ->
+    let i = index_of_name na in
+    let th = INST [n_tm, n_var_num] dbl_array.(i) in
+    let r_th = if i >= half_base then ncdouble_core n_tm else ndouble_core n_tm in
+    TRANS th (AP_TERM dbl_bit_array.(i) r_th)
+  | _ -> error "ndouble_core" [tm] []
+
+and ncdouble_core tm =
+  match tm with
+  | Const ("_0", _) -> cdbl_zero
+  | Comb (Const (na, _), Const ("_0", _)) ->
+    cdbl_0_array.(index_of_name na)
+  | Comb (Const (na, _), n_tm) ->
+    let i = index_of_name na in
+    let th = INST [n_tm, n_var_num] cdbl_array.(i) in
+    let r_th = if i >= half_base then ncdouble_core n_tm else ndouble_core n_tm in
+    TRANS th (AP_TERM cdbl_bit_array.(i) r_th)
+  | _ -> error "ncdouble_core" [tm] [];;
+
+(* |- 2 * n = fast_dbl n *)
+let two_mul_eq_dbl = (standardize o prove)
+  (`2 * n = fast_dbl n`,
+   REWRITE_TAC[fast_dbl_eq] THEN ARITH_TAC);;
+
+let two_mul_0 =
+  standardize (TRANS (INST [zero_const, n_var_num] two_mul_eq_dbl) dbl_zero);;
+
+(* O(1) rule for base = 2: |- 2 * n = F0 n *)
+let two_mul_base2 =
+  if maximum = 2 then standardize (SYM d0_explicit) else TRUTH;;
+
+(* Precomputed 1-digit doubling table: |- 2 * F_i _0 = ... *)
+let two_mul_0_array = Array.init maximum (fun i ->
+  let th = TRANS (INST [dj0_array.(i), n_var_num] two_mul_eq_dbl) dbl_0_array.(i) in
+  standardize (if i = 0 then TRANS th d0_0 else th));;
+
+(* Proves |- 2 * tm = r.
+   - _0 and 1-digit numerals: O(1) table lookup (0 inferences).
+   - base = 2: O(1) via |- 2 * n = F0 n (1 INST).
+   - even base >= 4: delegates to ndouble_core and rewrites LHS via two_mul_eq_dbl. *)
+let ndouble tm =
+  match tm with
+  | Const ("_0", _) -> two_mul_0
+  | Comb (Const (na, _), Const ("_0", _)) ->
+    two_mul_0_array.(index_of_name na)
+  | Comb (Const (_, _), _) ->
+    if maximum = 2 then
+      INST [tm, n_var_num] two_mul_base2
+    else
+      TRANS (INST [tm, n_var_num] two_mul_eq_dbl) (ndouble_core tm)
+  | _ -> error "ndouble" [tm] [];;
+
+(* ------------------------------------------------------------------------- *)
 (* Direct digit-spine subtraction helper (zero Big_int / Num allocation)     *)
 (* ------------------------------------------------------------------------- *)
 
@@ -1588,13 +1718,13 @@ let mul_1_n, mul_n_1 =
   let th = prove (cond, REWRITE_TAC[def_array.(1); mul_n_0_z] THEN ARITH_TAC) in
   standardize th, (standardize o ONCE_REWRITE_RULE[MULT_AC]) th;;
 
-(* |- n * F2 _0 = n + n (when base > 2) *)
+(* |- n * F2 _0 = fast_dbl n (when base > 2) *)
 let mul_n_2 =
   if maximum > 2 then
     standardize (prove (
       mk_eq (mk_binop mul_op_num n_var_num dj0_array.(2),
-             mk_binop add_op_num n_var_num n_var_num),
-      REWRITE_TAC[def_array.(2); mul_n_0_z] THEN ARITH_TAC))
+             mk_comb (fast_dbl_const, n_var_num)),
+      REWRITE_TAC[def_array.(2); fast_dbl_eq; mul_n_0_z] THEN ARITH_TAC))
   else TRUTH;;
 
 (* |- F0 n * t = F0 (n * t) and |- t * F0 n = F0 (t * n) *)
@@ -1626,15 +1756,14 @@ let mul_n_bmax_rule =
       REWRITE_TAC[def_array.(0); def_array.(maximum - 1); mul_n_0_z] THEN ARITH_TAC)
   else TRUTH;;
 
-let half_base = maximum / 2;;
-let has_half_opt = maximum >= 6 && maximum mod 2 = 0;;
+let has_half_opt = maximum >= 6;;
 
 let mul_n_half_rule =
   if has_half_opt then
     (UNDISCH_ALL o standardize o prove) (
-      mk_imp (mk_eq (mk_binop add_op_num t_var_num t_var_num, mk_comb (d0_const, m_var_num)),
+      mk_imp (mk_eq (mk_comb (fast_dbl_const, t_var_num), mk_comb (d0_const, m_var_num)),
               mk_eq (mk_binop mul_op_num m_var_num dj0_array.(half_base), t_var_num)),
-      REWRITE_TAC[def_array.(0); def_array.(half_base); mul_n_0_z] THEN ARITH_TAC)
+      REWRITE_TAC[def_array.(0); def_array.(half_base); fast_dbl_eq; mul_n_0_z] THEN ARITH_TAC)
   else TRUTH;;
 
 (* Complement rule: a + b = F0(F1 _0), m * b = rb, rb + r = F0 m |- m * a = r *)
@@ -1866,7 +1995,7 @@ let nmul1_right j arg =
       nmul1_right_core j arg
     | _ ->
       if j = 2 && maximum > 2 then
-        TRANS (INST [arg, n_var_num] mul_n_2) (nadd arg arg)
+        TRANS (INST [arg, n_var_num] mul_n_2) (ndouble_core arg)
       else if j = maximum - 1 && maximum >= 4 then
         let res_tm = sub_d0_m arg in
         let th_add = nadd arg res_tm in
@@ -1874,7 +2003,7 @@ let nmul1_right j arg =
         (try MY_PROVE_HYP th_add th0 with Failure _ -> nmul1_right_core j arg)
       else if has_half_opt && j = half_base then
         let res_tm = half_d0_m arg in
-        let th_add = nadd res_tm res_tm in
+        let th_add = ndouble_core res_tm in
         let th0 = INST [arg, m_var_num; res_tm, t_var_num] mul_n_half_rule in
         (try MY_PROVE_HYP th_add th0 with Failure _ -> nmul1_right_core j arg)
       else
@@ -2125,7 +2254,7 @@ let compute_mul1_with_cache larg larg_size j cache =
   if j = 1 then
     INST [larg, n_var_num] mul_n_1
   else if j = 2 && maximum > 2 then
-    TRANS (INST [larg, n_var_num] mul_n_2) (nadd larg larg)
+    TRANS (INST [larg, n_var_num] mul_n_2) (ndouble_core larg)
   else if j = maximum - 1 && maximum >= 4 then
     let res_tm = sub_d0_m larg in
     let th_add = nadd larg res_tm in
@@ -2133,7 +2262,7 @@ let compute_mul1_with_cache larg larg_size j cache =
     (try MY_PROVE_HYP th_add th0 with Failure _ -> nmul1_right_core j larg)
   else if has_half_opt && j = half_base then
     let res_tm = half_d0_m larg in
-    let th_add = nadd res_tm res_tm in
+    let th_add = ndouble_core res_tm in
     let th0 = INST [larg, m_var_num; res_tm, t_var_num] mul_n_half_rule in
     (try MY_PROVE_HYP th_add th0 with Failure _ -> nmul1_right_core j larg)
   else if larg_size >= 4 then
@@ -2376,6 +2505,99 @@ let rec nmul larg rarg =
     | _ -> error "nmul" [larg; rarg] [];;
 
 (* ------------------------------------------------------------------------- *)
+(* m DIV 2: ndiv2                                                            *)
+(* ------------------------------------------------------------------------- *)
+
+let two_nat = standardize_tm (mk_small_nat_raw 2);;
+
+let div2_0 =
+  let th = ARITH_RULE `0 DIV 2 = 0` in
+  let th1 = AP_THM (AP_TERM div_op_num zero_const_eq_zero) two_num in
+  standardize (TRANS (TRANS th1 th) zero_eq_zero_const);;
+
+(* fast_dbl q = m |- m DIV 2 = q  and  fast_cdbl q = m |- m DIV 2 = q *)
+let div2_even_rule = (UNDISCH_ALL o standardize o prove)
+  (`fast_dbl q = m ==> m DIV 2 = q`,
+   REWRITE_TAC[fast_dbl_eq] THEN ARITH_TAC);;
+
+let div2_odd_rule = (UNDISCH_ALL o standardize o prove)
+  (`fast_cdbl q = m ==> m DIV 2 = q`,
+   REWRITE_TAC[fast_cdbl_eq] THEN ARITH_TAC);;
+
+(* O(1) rules for base = 2: |- F0 n DIV 2 = n  and  |- F1 n DIV 2 = n *)
+let div2_base2_0, div2_base2_1 =
+  if maximum = 2 then
+    let th0 = standardize (prove (
+      mk_eq (mk_binop div_op_num (mk_comb (d0_const, n_var_num)) two_num, n_var_num),
+      REWRITE_TAC[def_array.(0)] THEN ARITH_TAC)) in
+    let th1 = standardize (prove (
+      mk_eq (mk_binop div_op_num (mk_comb (const_array.(1), n_var_num)) two_num, n_var_num),
+      REWRITE_TAC[def_array.(1)] THEN ARITH_TAC)) in
+    th0, th1
+  else TRUTH, TRUTH;;
+
+(* Precomputed 1-digit halving table: |- F_i _0 DIV 2 = F_{i/2} _0 (or _0 if i < 2) *)
+let div2_0_array = Array.init maximum (fun i ->
+  if i = 0 then
+    standardize (TRANS (AP_THM (AP_TERM div_op_num d0_0) two_num) div2_0)
+  else if i = 1 then
+    standardize (MY_PROVE_HYP cdbl_zero
+      (INST [zero_const, q_var_num; dj0_array.(1), m_var_num] div2_odd_rule))
+  else
+    let q = i / 2 in
+    let q_tm = dj0_array.(q) and m_tm = dj0_array.(i) in
+    let th_dbl, rule =
+      if i mod 2 = 0 then dbl_0_array.(q), div2_even_rule
+      else cdbl_0_array.(q), div2_odd_rule in
+    standardize (MY_PROVE_HYP th_dbl (INST [q_tm, q_var_num; m_tm, m_var_num] rule)));;
+
+(* Single-pass digit-spine halving for even base B = 2 * half_base.
+   Returns (q_tm, carry) where q_tm = tm DIV 2 (canonical) and
+   carry = 0 if tm is even, half_base if tm is odd. *)
+let div2_spine tm =
+  let rec loop = function
+    | Const ("_0", _) -> zero_const, 0
+    | Comb (Const (na, _), rest) ->
+      let i = index_of_name na in
+      let q_rest, carry = loop rest in
+      let d = (i lsr 1) + carry in
+      let q_tm =
+        if q_rest == zero_const then
+          if d = 0 then zero_const else dj0_array.(d)
+        else mk_comb (const_array.(d), q_rest) in
+      q_tm, (if i land 1 = 1 then half_base else 0)
+    | t -> error "div2_spine" [t] [] in
+  loop tm;;
+
+(* Proves |- tm DIV 2 = q.
+   - _0 and 1-digit numerals: O(1) table lookup (0 inferences).
+   - base = 2: O(1) via div2_base2_0 / div2_base2_1 (1 INST).
+   - even base >= 4: computes q = tm DIV 2 on the digit spine and certifies
+     fast_dbl q = tm (even) or fast_cdbl q = tm (odd) via ndouble_core / ncdouble_core. *)
+let ndiv2 tm =
+  match tm with
+  | Const ("_0", _) -> div2_0
+  | Comb (Const (na, _), Const ("_0", _)) ->
+    div2_0_array.(index_of_name na)
+  | Comb (Const (na, _), n_tm) ->
+    if maximum = 2 then
+      INST [n_tm, n_var_num] (if index_of_name na = 0 then div2_base2_0 else div2_base2_1)
+    else
+      let q_tm, carry = div2_spine tm in
+      if carry = 0 then
+        let th_dbl = ndouble_core q_tm in
+        MY_PROVE_HYP th_dbl (INST [q_tm, q_var_num; tm, m_var_num] div2_even_rule)
+      else
+        let th_dbl = ncdouble_core q_tm in
+        MY_PROVE_HYP th_dbl (INST [q_tm, q_var_num; tm, m_var_num] div2_odd_rule)
+  | _ -> error "ndiv2" [tm] [];;
+
+(* |- m DIV two_nat = m DIV 2, used to accelerate ndiv m (mk_small_nat 2) *)
+let div_two_nat_th =
+  let two_nat_eq_two = SYM (TO_NAT_CONV two_num) in
+  standardize (AP_TERM (mk_comb (div_op_num, m_var_num)) two_nat_eq_two);;
+
+(* ------------------------------------------------------------------------- *)
 (* m DIV n: ndiv                                                             *)
 (* ------------------------------------------------------------------------- *)
 
@@ -2446,6 +2668,11 @@ let ndiv m_tm n_tm =
     match n_tm with
     | Comb (Const (nb, _), Const ("_0", _)) when index_of_name nb = 1 ->
       INST [m_tm, m_var_num] div_1_thm
+    | Comb (Const (nb, _), Const ("_0", _)) when maximum > 2 && index_of_name nb = 2 ->
+      TRANS (INST [m_tm, m_var_num] div_two_nat_th) (ndiv2 m_tm)
+    | Comb (Const (nb, _), Comb (Const (nc, _), Const ("_0", _)))
+      when maximum = 2 && index_of_name nb = 0 && index_of_name nc = 1 ->
+      TRANS (INST [m_tm, m_var_num] div_two_nat_th) (ndiv2 m_tm)
     | _ ->
       (* Native 64-bit int fast path when both operands fit in chunk_k digits *)
       let m_lo, m_rest = dest_chunk m_tm chunk_k 0 1 in

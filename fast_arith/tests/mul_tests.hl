@@ -36,8 +36,19 @@ let pairs_64  = mk_pairs 10 64;;
 let pairs_128 = mk_pairs 5 128;;
 let pairs_256 = mk_pairs 3 256;;
 
+let two_nat = mk_small_nat 2;;
+
 let run_sqr pairs = Array.iter (fun (a, _) -> ignore (nsqr a)) pairs;;
 let run_mul pairs = Array.iter (fun (a, b) -> ignore (nmul a b)) pairs;;
+let run_div2 pairs = Array.iter (fun (a, _) -> ignore (ndiv2 a)) pairs;;
+let run_div_2 pairs = Array.iter (fun (a, _) -> ignore (ndiv a two_nat)) pairs;;
+
+snd (test 100 run_div2 pairs_8);;
+snd (test 100 run_div_2 pairs_8);;
+snd (test 100 run_div2 pairs_16);;
+snd (test 100 run_div_2 pairs_16);;
+snd (test 100 run_div2 pairs_32);;
+snd (test 100 run_div_2 pairs_32);;
 
 (* -------------------------------------------------------------------------- *)
 (* 1. Compare nsqr vs nmul (same-size inputs)                                 *)

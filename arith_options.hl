@@ -22,6 +22,9 @@ let init_cache_size = ref 10000;;
 (* Maximal size of the cache *)
 let max_cache_size = ref 20000;;
 
+(* Expected maximal numeral size (in base digits) for precomputing Karatsuba lemmas *)
+let karatsuba_max_size = ref 64;;
+
 (* Minimal exponent value for floating point numbers *)
 (* (should be even for the square root operation) *)
 let min_exp = ref 50;;

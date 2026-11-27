@@ -13,6 +13,7 @@ Arith_options.base := 100;;
 
 needs "fast_arith/nat_arith.hl";;
 needs "fast_arith/arith_num3.hl";;
+needs "fast_arith/fast_num.hl";;
 
 module type Arith_num_sig =
   sig
@@ -558,6 +559,13 @@ end;;
 
 ignore (run_all_tests ~seed:42 ~n_samples:10000
   ((module Nat_arith : Arith_num_sig), (module Arith_opt : Arith_num_sig)));;
+
+ignore (run_all_tests ~seed:42 ~n_samples:10000
+  ((module Nat_arith : Arith_num_sig), (module Fast_num : Arith_num_sig)));;
+
+ignore (run_all_tests ~seed:42 ~n_samples:10000
+  ((module Arith_opt : Arith_num_sig), (module Fast_num : Arith_num_sig)));;
+
 
 (* To run all tests immediately upon loading this file:
    run_all_tests ~seed:42

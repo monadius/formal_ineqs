@@ -423,8 +423,6 @@ let rec nsuc tm =
 (* n = 0 (neq0) and n = _0 (neq_zero)                                        *)
 (* ------------------------------------------------------------------------- *)
 
-let eq_0_lemma = ARITH_RULE `a + b = 0 <=> a = 0 /\ b = 0`;;
-
 (* Public neq0: |- tm = 0 <=> T/F *)
 let eq_d0_0 = (standardize o prove)
   (mk_eq (mk_eq (mk_comb (d0_const, n_var_num), `0`), `n = 0`),
@@ -434,9 +432,11 @@ let eq_0_0 = (standardize o prove)
   (`_0 = 0 <=> T`,
    REWRITE_TAC[NUMERAL]);;
 
-let eq_0_i i =
-  let concl = mk_eq (mk_eq (mk_comb (const_array.(i), n_var_num), zero_num), f_const) in
-  prove (concl, REWRITE_TAC[def_array.(i); eq_0_lemma; ARITH_EQ]);;
+let eq_0_i =
+  let eq_0_lemma = ARITH_RULE `a + b = 0 <=> a = 0 /\ b = 0` in
+  fun i ->
+    let concl = mk_eq (mk_eq (mk_comb (const_array.(i), n_var_num), zero_num), f_const) in
+    prove (concl, REWRITE_TAC[def_array.(i); eq_0_lemma; ARITH_EQ]);;
 
 let eq0_array =
   Array.init maximum (fun i -> standardize (if i = 0 then eq_0_0 else eq_0_i i));;
@@ -1388,7 +1388,6 @@ let sub_spine_opt a b =
 (* ------------------------------------------------------------------------- *)
 
 let sub_lemma1 = (UNDISCH_ALL o standardize o ARITH_RULE) `n + t = m ==> m - n = t:num`;;
-let sub_lemma2 = (UNDISCH_ALL o standardize o REWRITE_RULE[NUMERAL] o ARITH_RULE) `m + t = n ==> m - n = 0`;;
 let sub_lt_lemma = (UNDISCH_ALL o standardize o PURE_REWRITE_RULE[NUMERAL] o ARITH_RULE)
   `(m < n <=> T) ==> m - n = 0`;;
 let le_lemma = (UNDISCH_ALL o standardize o ARITH_RULE) `n + t = m ==> n <= m:num`;;
@@ -1427,17 +1426,6 @@ let le_thm_00_array = Array.init (maximum * maximum) (fun idx ->
   else
     TRUTH);;
 
-let nsub_fallback m_tm n_tm =
-  let m = dest_nat m_tm and n = dest_nat n_tm in
-  let t = m -/ n in
-  if sign_num t >= 0 then
-    let t_tm = mk_nat t in
-    let th0 = INST [n_tm, n_var_num; t_tm, t_var_num; m_tm, m_var_num] sub_lemma1 in
-    MY_PROVE_HYP (nadd n_tm t_tm) th0
-  else
-    let th_lt, _ = nlt_rec m_tm n_tm in
-    MY_PROVE_HYP th_lt (INST [m_tm, m_var_num; n_tm, n_var_num] sub_lt_lemma);;
-
 let nsub m_tm n_tm =
   if eq_nat_tm m_tm n_tm then
     INST [m_tm, n_var_num] sub_refl
@@ -1453,39 +1441,21 @@ let nsub m_tm n_tm =
             (match n' with
              | Const ("_0", _) -> sub_00_array.(index_of_name na * maximum + index_of_name nb)
              | _ ->
-               let th_lt, flag = nlt_rec m_tm n_tm in
-               if flag then
-                 MY_PROVE_HYP th_lt (INST [m_tm, m_var_num; n_tm, n_var_num] sub_lt_lemma)
-               else
-                 nsub_fallback m_tm n_tm)
+               (* th_lt is always true for canonical numerals (1-digit m < >=2-digit n) *)
+               let th_lt, _ = nlt_rec m_tm n_tm in
+               MY_PROVE_HYP th_lt (INST [m_tm, m_var_num; n_tm, n_var_num] sub_lt_lemma))
           | _ ->
             (match sub_spine_opt m_tm n_tm with
              | Some t_tm ->
                let th_add = nadd n_tm t_tm in
                let th0 = INST [n_tm, n_var_num; t_tm, t_var_num; m_tm, m_var_num] sub_lemma1 in
-               (try MY_PROVE_HYP th_add th0 with Failure _ -> nsub_fallback m_tm n_tm)
+               MY_PROVE_HYP th_add th0
              | None ->
-               let th_lt, flag = nlt_rec m_tm n_tm in
-               if flag then
-                 MY_PROVE_HYP th_lt (INST [m_tm, m_var_num; n_tm, n_var_num] sub_lt_lemma)
-               else
-                 nsub_fallback m_tm n_tm))
+               (* th_lt is always true for canonical numerals (sub_spine_opt returns None iff m < n) *)
+               let th_lt, _ = nlt_rec m_tm n_tm in
+               MY_PROVE_HYP th_lt (INST [m_tm, m_var_num; n_tm, n_var_num] sub_lt_lemma)))
        | _ -> error "nsub" [m_tm; n_tm] [])
     | _ -> error "nsub" [m_tm; n_tm] [];;
-
-let nsub_le_fallback tm1 tm2 =
-  let m = dest_nat tm1 and n = dest_nat tm2 in
-  let t = m -/ n in
-  if sign_num t >= 0 then
-    let t_tm = mk_nat t in
-    let inst = INST [tm2, n_var_num; t_tm, t_var_num; tm1, m_var_num] in
-    let th_add = nadd tm2 t_tm in
-    (MY_PROVE_HYP th_add (inst sub_lemma1), MY_PROVE_HYP th_add (inst le_lemma), true)
-  else
-    let t_tm = mk_nat (abs_num t) in
-    let inst = INST [tm2, m_var_num; t_tm, t_var_num; tm1, n_var_num] in
-    let th_add = nadd tm1 t_tm in
-    (MY_PROVE_HYP th_add (inst sub_lemma1), MY_PROVE_HYP th_add (inst le_lemma), false);;
 
 (* Returns either (tm1 - tm2, tm2 <= tm1, true) or (tm2 - tm1, tm1 <= tm2, false) *)
 let nsub_le tm1 tm2 =
@@ -1512,18 +1482,16 @@ let nsub_le tm1 tm2 =
              | Some t_tm ->
                let inst = INST [tm2, n_var_num; t_tm, t_var_num; tm1, m_var_num] in
                let th_add = nadd tm2 t_tm in
-               (try
-                 (MY_PROVE_HYP th_add (inst sub_lemma1), MY_PROVE_HYP th_add (inst le_lemma), true)
-                with Failure _ -> nsub_le_fallback tm1 tm2)
+               (MY_PROVE_HYP th_add (inst sub_lemma1), MY_PROVE_HYP th_add (inst le_lemma), true)
              | None ->
                (match sub_spine_opt tm2 tm1 with
                 | Some t_tm ->
                   let inst = INST [tm2, m_var_num; t_tm, t_var_num; tm1, n_var_num] in
                   let th_add = nadd tm1 t_tm in
-                  (try
-                    (MY_PROVE_HYP th_add (inst sub_lemma1), MY_PROVE_HYP th_add (inst le_lemma), false)
-                   with Failure _ -> nsub_le_fallback tm1 tm2)
-                | None -> nsub_le_fallback tm1 tm2)))
+                  (MY_PROVE_HYP th_add (inst sub_lemma1), MY_PROVE_HYP th_add (inst le_lemma), false)
+                | None ->
+                  (* Never occurs for canonical numerals since tm1 < tm2 implies tm2 >= tm1 *)
+                  error "nsub_le" [tm1; tm2] [])))
        | _ -> error "nsub_le" [tm1; tm2] [])
     | _ -> error "nsub_le" [tm1; tm2] [];;
 
@@ -1882,41 +1850,80 @@ let karatsuba_base = prove (
    ASM_REWRITE_TAC[LEFT_ADD_DISTRIB; RIGHT_ADD_DISTRIB; MULT_ASSOC] THEN
    REWRITE_TAC[MULT_AC; ADD_AC]]);;
 
-let shift_mul_cache = Hashtbl.create 32;;
+let karatsuba_max_h = max 0 (!Arith_options.karatsuba_max_size / 2);;
 
-let rec get_shift_mul h =
-  try Hashtbl.find shift_mul_cache h
-  with Not_found ->
-    let th =
-      if h = 1 then d0_explicit
-      else
-        let prev = get_shift_mul (h - 1) in
-        let th1 = AP_TERM d0_const prev in
-        let th2 = INST [rand (concl prev), n_var_num] d0_explicit in
-        let th3 = TRANS th1 th2 in
-        let rhs = rand (concl th3) in
-        let b_tm, rest = dest_comb rhs in
-        let b_tm = rand b_tm in
-        let bh_tm, _ = dest_comb rest in
-        let bh_tm = rand bh_tm in
-        let assoc = INST [b_tm, m_var_num; bh_tm, n_var_num; n_var_num, p_var_num] (SPEC_ALL MULT_ASSOC) in
-        let mul_c = NUM_MULT_CONV (mk_binop mul_op_num b_tm bh_tm) in
-        standardize (TRANS th3 (TRANS assoc (AP_THM (AP_TERM mul_op_num mul_c) n_var_num))) in
-    Hashtbl.add shift_mul_cache h th;
-    th;;
+let build_shift_mul prev =
+  let th1 = AP_TERM d0_const prev in
+  let th2 = INST [rand (concl prev), n_var_num] d0_explicit in
+  let th3 = TRANS th1 th2 in
+  let rhs = rand (concl th3) in
+  let b_tm, rest = dest_comb rhs in
+  let b_tm = rand b_tm in
+  let bh_tm, _ = dest_comb rest in
+  let bh_tm = rand bh_tm in
+  let assoc = INST [b_tm, m_var_num; bh_tm, n_var_num; n_var_num, p_var_num] (SPEC_ALL MULT_ASSOC) in
+  let mul_c = NUM_MULT_CONV (mk_binop mul_op_num b_tm bh_tm) in
+  TRANS th3 (TRANS assoc (AP_THM (AP_TERM mul_op_num mul_c) n_var_num));;
 
-let karatsuba_h_cache = Hashtbl.create 32;;
+let build_karatsuba_h sh_th =
+  let sh_const = lhand (rand (concl sh_th)) in
+  let th0 = INST [sh_const, s_v] karatsuba_base in
+  let th1 = REWRITE_RULE[GSYM sh_th] th0 in
+  (UNDISCH_ALL o REWRITE_RULE[IMP_CONJ]) th1;;
+
+(* Precomputed read-only tables for h = 1 .. karatsuba_max_h (domain-safe, lock-free) *)
+let shift_mul_array =
+  let arr = Array.make (karatsuba_max_h + 1) TRUTH in
+  if karatsuba_max_h >= 1 then begin
+    arr.(1) <- d0_explicit;
+    for h = 2 to karatsuba_max_h do
+      arr.(h) <- standardize (build_shift_mul arr.(h - 1))
+    done
+  end;
+  arr;;
+
+let karatsuba_h_array =
+  let arr = Array.make (karatsuba_max_h + 1) TRUTH in
+  for h = 1 to karatsuba_max_h do
+    arr.(h) <- standardize (build_karatsuba_h shift_mul_array.(h))
+  done;
+  arr;;
+
+(* Mutex-guarded fallback caches for h > karatsuba_max_h *)
+let karatsuba_mutex = Mutex.create ();;
+let shift_mul_cache = Hashtbl.create 16;;
+let karatsuba_h_cache = Hashtbl.create 16;;
+
+let rec get_shift_mul_locked h =
+  if h <= karatsuba_max_h then shift_mul_array.(h)
+  else
+    try Hashtbl.find shift_mul_cache h
+    with Not_found ->
+      let th =
+        if h = 1 then d0_explicit
+        else build_shift_mul (get_shift_mul_locked (h - 1)) in
+      Hashtbl.add shift_mul_cache h th;
+      th;;
+
+let with_mutex m f =
+  Mutex.lock m;
+  try
+    let res = f () in
+    Mutex.unlock m;
+    res
+  with e ->
+    Mutex.unlock m;
+    raise e;;
 
 let get_karatsuba_h h =
-  try Hashtbl.find karatsuba_h_cache h
-  with Not_found ->
-    let sh_th = get_shift_mul h in
-    let sh_const = lhand (rand (concl sh_th)) in
-    let th0 = INST [sh_const, s_v] karatsuba_base in
-    let th1 = REWRITE_RULE[GSYM sh_th] th0 in
-    let th2 = (UNDISCH_ALL o standardize o REWRITE_RULE[IMP_CONJ]) th1 in
-    Hashtbl.add karatsuba_h_cache h th2;
-    th2;;
+  if h <= karatsuba_max_h then karatsuba_h_array.(h)
+  else
+    with_mutex karatsuba_mutex (fun () ->
+      try Hashtbl.find karatsuba_h_cache h
+      with Not_found ->
+        let th = build_karatsuba_h (get_shift_mul_locked h) in
+        Hashtbl.add karatsuba_h_cache h th;
+        th);;
 
 let rec mk_shift h tm =
   if h <= 0 then tm

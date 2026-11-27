@@ -1826,7 +1826,7 @@ let rec nsqr tm =
 (* Karatsuba infrastructure (lazy shift & algebraic combination lemmas)      *)
 (* ------------------------------------------------------------------------- *)
 
-let karatsuba_threshold = ref 20;;
+let karatsuba_threshold = ref 40;;
 
 let x0_v = standardize_tm `x0:num` and x1_v = standardize_tm `x1:num`
 and y0_v = standardize_tm `y0:num` and y1_v = standardize_tm `y1:num`

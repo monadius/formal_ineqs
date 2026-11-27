@@ -1,0 +1,89 @@
+(* ========================================================================== *)
+(*      Simple performance tests for Fast_num                                 *)
+(* ========================================================================== *)
+
+needs "misc/misc_functions.hl";;
+needs "arith_options.hl";;
+
+Arith_options.base := 100;;
+Arith_options.karatsuba_max_size := 256;;
+
+needs "fast_arith/fast_num.hl";;
+
+open Misc_functions;;
+open Fast_num;;
+
+(* Deterministic input generation (generated once) *)
+let rng = Random.State.make [| 42 |];;
+
+let mk_rand_nat n_digits =
+  let rec loop k acc =
+    if k = 0 then acc
+    else
+      let d =
+        if k = n_digits then 1 + Random.State.int rng (arith_base - 1)
+        else Random.State.int rng arith_base in
+      loop (k - 1) (mk_comb (const_array.(d), acc)) in
+  loop n_digits Misc_vars.zero_const;;
+
+let mk_pairs n_pairs n_digits =
+  Array.init n_pairs (fun _ -> mk_rand_nat n_digits, mk_rand_nat n_digits);;
+
+let pairs_8   = mk_pairs 100 8;;
+let pairs_16  = mk_pairs 50 16;;
+let pairs_32  = mk_pairs 20 32;;
+let pairs_64  = mk_pairs 10 64;;
+let pairs_128 = mk_pairs 5 128;;
+let pairs_256 = mk_pairs 3 256;;
+
+let run_sqr pairs = Array.iter (fun (a, _) -> ignore (nsqr a)) pairs;;
+let run_mul pairs = Array.iter (fun (a, b) -> ignore (nmul a b)) pairs;;
+
+(* -------------------------------------------------------------------------- *)
+(* 1. Compare nsqr vs nmul (same-size inputs)                                 *)
+(* -------------------------------------------------------------------------- *)
+
+karatsuba_threshold := 1000;;
+
+let sqr_8_time  = snd (test 10 run_sqr pairs_8);;
+let mul_8_time  = snd (test 10 run_mul pairs_8);;
+
+let sqr_16_time = snd (test 10 run_sqr pairs_16);;
+let mul_16_time = snd (test 10 run_mul pairs_16);;
+
+let sqr_32_time = snd (test 10 run_sqr pairs_32);;
+let mul_32_time = snd (test 10 run_mul pairs_32);;
+
+(* -------------------------------------------------------------------------- *)
+(* 2. Compare different karatsuba_threshold values                            *)
+(* -------------------------------------------------------------------------- *)
+
+let test_karatsuba thresh pairs =
+  karatsuba_threshold := thresh;
+  snd (test 1 run_mul pairs);;
+
+(* 32 digits *)
+let k_32_off = test_karatsuba 1000 pairs_32;;
+let k_32_16  = test_karatsuba 16   pairs_32;;
+let k_32_24  = test_karatsuba 24   pairs_32;;
+let k_32_32  = test_karatsuba 32   pairs_32;;
+
+(* 64 digits *)
+let k_64_off = test_karatsuba 1000 pairs_64;;
+let k_64_20  = test_karatsuba 20   pairs_64;;
+let k_64_32  = test_karatsuba 32   pairs_64;;
+let k_64_48  = test_karatsuba 48   pairs_64;;
+
+(* 128 digits *)
+let k_128_off = test_karatsuba 1000 pairs_128;;
+let k_128_20  = test_karatsuba 20   pairs_128;;
+let k_128_32  = test_karatsuba 32   pairs_128;;
+let k_128_48  = test_karatsuba 48   pairs_128;;
+
+(* 256 digits *)
+let k_256_off = test_karatsuba 1000 pairs_256;;
+let k_256_32  = test_karatsuba 32   pairs_256;;
+let k_256_48  = test_karatsuba 48   pairs_256;;
+let k_256_64  = test_karatsuba 64   pairs_256;;
+
+karatsuba_threshold := 40;;

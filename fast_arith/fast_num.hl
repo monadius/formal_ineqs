@@ -6,7 +6,6 @@
 
 (* -------------------------------------------------------------------------- *)
 (* Formal natural arithmetic with an arbitrary even base                      *)
-(* Combines and extends the best ideas from nat_arith.hl and arith_num3.hl:   *)
 (*  - Full term/theorem standardization (pointer sharing for fast aconv)      *)
 (*  - Direct pattern matching on term constructors (zero tuple allocations)   *)
 (*  - _0-specialized terminal theorem tables for all unary/binary operations  *)
@@ -26,57 +25,94 @@
 
 module type Fast_num_sig =
   sig
+    (* Base B (>= 2) used for numeral representation (from !Arith_options.base) *)
     val arith_base : int
+    (* |- fast_base_const = B *)
     val base_const : thm
+    (* Digit constant names: [|"F0"; "F1"; ...; "F{B-1}"|] *)
     val name_array : string array
+    (* Digit constant terms of type :num->num: [|`F0`; `F1`; ...; `F{B-1}`|] *)
     val const_array : term array
-    (* |- F_i(n) = base * n + i *)
+    (* Digit definitions: def_array.(i) is |- F_i n = B * n + i *)
     val def_array : thm array
-    (* |- F_i(n) = F_i(_0) + F0(n) *)
+    (* Digit decompositions: def_thm_array.(i) is |- F_i n = F_i _0 + F0 n *)
     val def_thm_array : thm array
-    (* F6 -> 6, F30 -> 30 *)
+    (* Parses a digit constant name into its integer index ("F6" -> 6, "F30" -> 30) *)
     val index_of_name : string -> int
+    (* Flat 2D table index from two digit names: index_of_name s1 * arith_base + index_of_name s2 *)
     val index_of_name2 : string -> string -> int
 
+    (* Converts a non-negative integer Num.num to a base-B numeral term; fails on negative/non-integer *)
     val mk_nat : num -> term
+    (* Converts a non-negative OCaml int to a base-B numeral term; fails on negative input *)
     val mk_small_nat : int -> term
+    (* Converts a base-B numeral term back to a Num.num *)
     val dest_nat : term -> num
-    (* Returns the number of digits in a numeral (including all zero digits) *)
+    (* Returns the number of base-B digits in a numeral term (0 for _0, including zero digits) *)
     val size_nat : term -> int
+    (* Pretty-prints a base-B numeral term as '<decimal> to the given formatter *)
     val print_nat : formatter -> term -> unit
+    (* Parses a '<decimal> literal token into a base-B numeral preterm; raises Noparse otherwise *)
     val parse_nat : lexcode list -> preterm * lexcode list
 
+    (* Conversion from standard HOL Light NUMERAL n to |- n = <base-B numeral> *)
     val TO_NAT_CONV : term -> thm
+    (* Conversion from base-B numeral t to |- t = <standard NUMERAL> *)
     val FROM_NAT_CONV : term -> thm
+    (* Replaces all standard NUMERAL subterms in a term with base-B numerals *)
     val replace_numerals : term -> term
+    (* Rewrites all standard NUMERAL subterms in a theorem's conclusion to base-B numerals *)
     val REPLACE_NUMERALS : thm -> thm
 
+    (* Given numeral m, proves |- SUC m = r *)
     val nsuc : term -> thm
+    (* Given numeral m, proves |- PRE m = r (with PRE _0 = _0) *)
     val npre : term -> thm
 
+    (* Given numeral m, returns (|- EVEN m <=> T/F, bool_result) *)
     val neven : term -> thm * bool
+    (* Given numeral m, returns (|- ODD m <=> T/F, bool_result) *)
     val nodd : term -> thm * bool
+    (* Given numeral m, returns (|- m = 0 <=> T/F, bool_result) *)
     val neq0 : term -> thm * bool
+    (* Given numeral m, returns (|- 0 < m <=> T/F, bool_result) *)
     val ngt0 : term -> thm * bool
+    (* Given numerals m, n, returns (|- m = n <=> T/F, bool_result) *)
     val neq : term -> term -> thm * bool
+    (* Given numerals m, n, returns (|- m < n <=> T/F, bool_result) *)
     val nlt : term -> term -> thm * bool
+    (* Given numerals m, n, returns (|- m <= n <=> T/F, bool_result) *)
     val nle : term -> term -> thm * bool
 
+    (* Given numerals m, n, proves |- MAX m n = r *)
     val nmax : term -> term -> thm
+    (* Given numerals m, n, proves |- MIN m n = r *)
     val nmin : term -> term -> thm
 
+    (* Given numerals m, n, proves |- m + n = r *)
     val nadd : term -> term -> thm
+    (* Given numerals m, n, proves |- m - n = r (truncated: _0 when m < n) *)
     val nsub : term -> term -> thm
+    (* Given numerals m, n, returns (|- m - n = r, |- n <= m, true) if n <= m,
+       or (|- n - m = r, |- m <= n, false) if m < n *)
     val nsub_le : term -> term -> thm * thm * bool
+    (* Given numerals m, n, proves |- m * n = r *)
     val nmul : term -> term -> thm
+    (* Given numeral m, proves |- m * m = r *)
     val nsqr : term -> thm
+    (* Given numerals m, n (with n > 0), proves |- m DIV n = q; fails if n = 0 *)
     val ndiv : term -> term -> thm
 
+    (* Minimum digit length of the shorter operand to trigger Karatsuba in nmul (when smax <= 2 * smin) *)
     val karatsuba_threshold : int ref
 
+    (* Prints operation counters and cache table sizes to stdout *)
     val print_stats : unit -> unit
+    (* Resets all operation counters to 0 *)
     val reset_stats : unit -> unit
+    (* Clears all internal operation hash tables *)
     val reset_cache : unit -> unit
+    (* Concatenates the digit constant names of a numeral into a hash key string (e.g. F3 (F1 _0) -> "F3F1") *)
     val nat_tm_hash : term -> string
   end;;
 
@@ -96,7 +132,9 @@ let maximum = arith_base;;
 
 let _ =
   if maximum < 2 then
-    failwith "Fast_num: arith_base must be >= 2";;
+    failwith "Fast_num: arith_base must be >= 2"
+  else if maximum mod 2 <> 0 then
+    failwith "Fast_num: arith_base must be even";;
 
 (* ------------------------------------------------------------------------- *)
 (* Definitions and constants                                                 *)
@@ -227,10 +265,12 @@ let mk_small_nat n =
   else
     mk_small_nat_raw n;;
 
+(* Build exactly k digits from a native int n, attaching acc as the upper tail *)
 let rec mk_chunk k n acc =
   if k = 0 then acc
   else mk_comb (const_array.(n mod maximum), mk_chunk (k - 1) (n / maximum) acc);;
 
+(* Convert a non-negative Big_int to a numeral by splitting into chunk_k-digit native ints *)
 let rec mk_nat_big b =
   if Big_int.is_int_big_int b then
     mk_small_nat_raw (Big_int.int_of_big_int b)
@@ -246,6 +286,7 @@ let mk_nat n =
   else
     mk_nat_big (Num.big_int_of_num n);;
 
+(* Decode up to k least-significant digits into a native int, returning (value, remaining_term) *)
 let rec dest_chunk tm k acc p =
   match tm with
   | Const ("_0", _) -> acc, tm
@@ -255,6 +296,7 @@ let rec dest_chunk tm k acc p =
     else dest_chunk rtm (k - 1) acc' (p * maximum)
   | _ -> error "dest_nat" [tm] [];;
 
+(* Convert a numeral term to Big_int by decoding chunk_k digits at a time *)
 let rec dest_nat_big tm =
   match tm with
   | Const ("_0", _) -> zero_big
@@ -333,6 +375,7 @@ let parse_nat ls =
 
 let sym_def_array = Array.init maximum (fun i -> standardize (SYM def_array.(i)));;
 
+(* Convert a standard HOL Light NUMERAL to base-maximum representation: |- n = F_d0(...) *)
 let TO_NAT_CONV =
   let mod_op_num = `MOD` in
   let div_base =
@@ -362,6 +405,7 @@ let TO_NAT_CONV =
     | Comb (Const ("NUMERAL", _), _) -> conv tm
     | _ -> failwith "TO_NAT_CONV";;
 
+(* Convert a base-maximum numeral back to a standard HOL Light NUMERAL *)
 let rec FROM_NAT_CONV tm =
   match tm with
   | Const ("_0", _) -> zero_const_eq_zero
@@ -390,6 +434,8 @@ let suc_0 = (standardize o prove)
   (mk_eq (`SUC _0`, dj0_array.(1)),
    REWRITE_TAC[def_array.(1); mul_n_0_z; ARITH_SUC; NUMERAL; ARITH_ADD]);;
 
+(* |- SUC (F_i n) = F_{i+1} n  (for i < base - 1)
+   |- SUC (F_{base-1} n) = F0 (SUC n) *)
 let suc_th i =
   let cflag = i + 1 >= maximum in
   let suc = if cflag then 0 else i + 1 in
@@ -401,10 +447,12 @@ let suc_th i =
 let suc_array = Array.init maximum (standardize o suc_th);;
 let suc_max = suc_array.(maximum - 1);;
 
+(* Precomputed single-digit successor table: |- SUC (F_i _0) = ... *)
 let suc_0_array = Array.init maximum (fun i ->
   let th = INST [zero_const, n_var_num] suc_array.(i) in
   standardize (if i = maximum - 1 then TRANS th (AP_TERM d0_const suc_0) else th));;
 
+(* Proves |- SUC tm = res; only recurses when the low digit carries (i = base - 1) *)
 let rec nsuc tm =
   match tm with
   | Const ("_0", _) -> suc_0
@@ -564,6 +612,10 @@ let pre_d0_0_array = Array.init maximum (fun j ->
   else if j = 1 then pre_d0_d1_0
   else standardize (INST [zero_const, n_var_num] pre_d0_array.(j)));;
 
+(* Proves |- PRE tm = res.
+   For nonzero low digits, decrements in one instantiation via pre_array.
+   For F0, uses 2-digit lookahead (pre_d0_array / pre_d0_0_array) to avoid recursion
+   when the next digit is nonzero, and chains borrows via pre_d0_chained across runs of F0. *)
 let rec npre tm =
   match tm with
   | Const ("_0", _) -> pre_0
@@ -621,6 +673,7 @@ let odd_d0 = (standardize o prove)
   (mk_eq (mk_comb (odd_const, mk_comb (d0_const, n_var_num)), f_const),
    REWRITE_TAC[NOT_ODD; even_d0]);;
 
+(* Derive |- EVEN (F_{i+1} n) <=> not b from |- EVEN (F_i n) <=> b using nsuc *)
 let next_even_th =
   let even_suc_t = prove (`(EVEN (SUC n) <=> T) <=> (EVEN n <=> F)`, REWRITE_TAC[EVEN]) in
   let even_suc_f = prove (`(EVEN (SUC n) <=> F) <=> (EVEN n <=> T)`, REWRITE_TAC[EVEN]) in
@@ -634,6 +687,7 @@ let next_even_th =
     let th2 = INST [b_tm, n_var_num] (if flag then even_suc_f else even_suc_t) in
     EQ_MP (SYM (TRANS th1 th2)) th;;
 
+(* Derive |- ODD (F_{i+1} n) <=> not b from |- ODD (F_i n) <=> b using nsuc *)
 let next_odd_th =
   let odd_suc_t = prove (`(ODD (SUC n) <=> T) <=> (ODD n <=> F)`, REWRITE_TAC[ODD]) in
   let odd_suc_f = prove (`(ODD (SUC n) <=> F) <=> (ODD n <=> T)`, REWRITE_TAC[ODD]) in
@@ -735,6 +789,7 @@ let rec ngt0 tm =
 let eq_refl_t = (standardize o prove) (`(n:num = n) <=> T`, REWRITE_TAC[]);;
 let eq_z_sym = (standardize o prove) (`_0 = n <=> n = _0`, REWRITE_TAC[EQ_SYM_EQ]);;
 
+(* Proves |- F_i m = F_j n <=> (m = n) if i = j, or <=> F if i <> j *)
 let gen_di_eq_dj =
   let aux_th = prove
     (`i < b /\ j < b /\ ~(i = j) ==> ~(b * m + i = b * n + j:num)`,
@@ -764,6 +819,7 @@ let gen_di_eq_dj =
         REWRITE_TAC[def_array.(i); def_array.(j)] THEN
         MATCH_MP_TAC aux_th THEN CONV_TAC NUM_REDUCE_CONV);;
 
+(* Shift both digits up by 1 along a diagonal: (F_i m = F_j n) -> (F_{i+1} m = F_{j+1} n) *)
 let gen_next_eq_thm =
   let suc_eq_th = ARITH_RULE `SUC m = SUC n <=> m = n` in
   fun th ->
@@ -775,6 +831,7 @@ let gen_next_eq_thm =
     let th1 = SYM (MK_COMB (AP_TERM eq_op_num suc_m, suc_n)) in
     standardize (TRANS (TRANS th1 th0) th);;
 
+(* Fill the base x base equality table by proving only the top row and stepping diagonals + symmetry *)
 let eq_array =
   let eqs = Array.make (maximum * maximum) TRUTH in
   let sym = standardize o INST [n_var_num, m_var_num; m_var_num, n_var_num] o
@@ -872,6 +929,7 @@ let lt0_0_array = Array.init maximum (fun i ->
   else
     standardize (INST [zero_const, n_var_num] lt0_array.(i)), true);;
 
+(* Proves |- F_i m < F_j n <=> (m < n if i >= j, else m <= n) *)
 let gen_di_lt_dj i j =
   let di_m = mk_comb (const_array.(i), m_var_num) in
   let dj_n = mk_comb (const_array.(j), n_var_num) in
@@ -882,6 +940,7 @@ let gen_di_lt_dj i j =
   (standardize o prove) (mk_eq (lt_tm, rhs),
     REWRITE_TAC[def_array.(i); def_array.(j)] THEN ARITH_TAC);;
 
+(* Shift both digits up by 1 along a diagonal using SUC m < SUC n <=> m < n *)
 let gen_next_lt_thm =
   let suc_lt_thm = ARITH_RULE `SUC m < SUC n <=> m < n` in
   fun th ->
@@ -952,6 +1011,7 @@ let le0_0_array = Array.init maximum (fun i ->
   else
     standardize (INST [zero_const, n_var_num] le0_array.(i)), false);;
 
+(* Proves |- F_i m <= F_j n <=> (m < n if i > j, else m <= n) *)
 let gen_di_le_dj i j =
   let di_m = mk_comb (const_array.(i), m_var_num) in
   let dj_n = mk_comb (const_array.(j), n_var_num) in
@@ -1013,6 +1073,7 @@ let le_m0_array = Array.init (maximum * maximum) (fun idx ->
   let th0 = INST [zero_const, n_var_num] le_array.(idx) in
   if i > j then TRANS th0 (INST [m_var_num, n_var_num] lt_n_0) else th0);;
 
+(* Specialized comparison helpers: |- _0 < rtm <=> T/F and |- ltm <= _0 <=> T/F *)
 let rec nlt_0 rtm =
   match rtm with
   | Const ("_0", _) -> lt_0_0, false
@@ -1043,6 +1104,9 @@ let rec nle_0 ltm =
       INST [m_tm, n_var_num] le0_array.(i), false
   | _ -> error "nle_0" [ltm] [];;
 
+(* Mutually recursive comparison on unequal numerals:
+   F_i m < F_j n reduces to m < n (i >= j) or m <= n (i < j),
+   F_i m <= F_j n reduces to m < n (i > j) or m <= n (i <= j). *)
 let rec nlt_rec ltm rtm =
   match rtm with
   | Const ("_0", _) -> INST [ltm, n_var_num] lt_n_0, false
@@ -1157,6 +1221,8 @@ let cadd_0_n = (standardize o prove) (`SUC (_0 + n) = SUC n`, REWRITE_TAC[add_0_
 let cadd_n_0 = (standardize o prove) (`SUC (n + _0) = SUC n`, REWRITE_TAC[add_n_0]);;
 let cadd_m_0 = standardize (INST [m_var_num, n_var_num] cadd_n_0);;
 
+(* Step the right-hand digit up by 1 using SUC (m + n) = m + SUC n:
+   from |- F_i m + F_j n = F_k (...) derive |- F_i m + F_{j+1} n = F_{k+1} (...) *)
 let th_add_right_next =
   let suc_add_right = ARITH_RULE `SUC (m + n) = m + SUC n` in
   fun th ->
@@ -1191,6 +1257,7 @@ let add_array =
   done;
   r;;
 
+(* Carry-in addition table: |- SUC (F_i m + F_j n) = F_{(i+j+1) mod base} (m + n | SUC (m + n)) *)
 let cadd_array =
   Array.init (maximum * maximum) (fun idx ->
     let th0 = AP_TERM suc_op_num add_array.(idx) in
@@ -1258,6 +1325,10 @@ let nadd_digit d rtm =
     else th
   | _ -> error "nadd_digit" [rtm] [];;
 
+(* Mutually recursive addition:
+   nadd proves |- ltm + rtm = res (carry-in = 0),
+   nadc proves |- SUC (ltm + rtm) = res (carry-in = 1).
+   When either tail reaches _0, uses pre-instantiated _0 tables and nsuc for carry. *)
 let rec nadd ltm rtm =
   match ltm with
   | Const ("_0", _) -> INST [rtm, n_var_num] add_0_n
@@ -1344,16 +1415,19 @@ let nadd_d0 r0 r1 =
 (* Direct digit-spine subtraction helper (zero Big_int / Num allocation)     *)
 (* ------------------------------------------------------------------------- *)
 
+(* Rebuild a numeral by folding a reversed (MSB-first) digit list onto an upper tail acc *)
 let rec build_rev acc = function
   | [] -> acc
   | d :: ds -> build_rev (mk_comb (const_array.(d), acc)) ds;;
 
+(* Strip leading zeros from an MSB-first digit list and build a canonical numeral term *)
 let rec strip_and_build = function
   | [] -> zero_const
   | 0 :: ds -> strip_and_build ds
   | ds -> build_rev zero_const ds;;
 
-(* Computes (a - b) directly on digit spines if a >= b; returns None if a < b *)
+(* Computes (a - b) directly on digit spines if a >= b; returns None if a < b.
+   Shares the untouched upper tail of a once b reaches _0 and borrow clears. *)
 let sub_spine_opt a b =
   let rec loop a b borrow acc =
     match a with
@@ -1426,6 +1500,9 @@ let le_thm_00_array = Array.init (maximum * maximum) (fun idx ->
   else
     TRUTH);;
 
+(* Proves |- m_tm - n_tm = res.
+   Computes candidate t = m - n via sub_spine_opt and certifies m - n = t by proving n + t = m
+   with nadd; when m < n (None), proves m < n <=> T via nlt_rec to yield m - n = _0. *)
 let nsub m_tm n_tm =
   if eq_nat_tm m_tm n_tm then
     INST [m_tm, n_var_num] sub_refl
@@ -1537,7 +1614,10 @@ let mul_d0_d0 = (standardize o prove)
 let mul_sym = (standardize o prove) (`m * n = n * m:num`, REWRITE_TAC[MULT_AC]);;
 let left_add_distrib = (standardize o SPEC_ALL) LEFT_ADD_DISTRIB;;
 
-(* Single-addition rules for j = base - 1 and j = base / 2 *)
+(* Single-addition rules for special single-digit multipliers:
+   - j = base - 1:  m + t = F0 m  ==>  m * F_{base-1}(_0) = t   (since F0 m = base * m)
+   - j = base / 2:  t + t = F0 m  ==>  m * F_{base/2}(_0) = t   (for even base >= 6)
+   Each replaces a full digit-by-digit multiplication with one nadd verification. *)
 let mul_n_bmax_rule =
   if maximum >= 4 then
     (UNDISCH_ALL o standardize o prove) (
@@ -1672,7 +1752,13 @@ let mul_step_array = Array.init maximum (fun j ->
     standardize (TRANS (AP_TERM (mk_comb (mul_op_num, m_var_num)) def_thm_array.(j))
                        (INST [dj0_array.(j), t_var_num] mul_step_gen)));;
 
-(* Dedicated squaring step theorems: O(base) precomputed theorems *)
+(* Dedicated squaring step theorems (O(base) precomputed theorems).
+   Expands (B * m + i)^2 = B^2 * m^2 + 2*i*B*m + i^2 = B * (B*m^2 + 2*i*m + q) + p,
+   where i^2 = B*q + p, split into three cases so any carry from 2*i into B*m^2
+   is folded into a single (m * m + m) term:
+   - 2*i < B:  (F_i m)^2 = F_p (F_q (m * m) + m * F_{2i}(_0))
+   - 2*i = B:  (F_i m)^2 = F_p (F_q (m * m + m))
+   - 2*i > B:  (F_i m)^2 = F_p (F_q (m * m + m) + m * F_{2i - B}(_0)) *)
 let sqr_step_array = Array.init maximum (fun i ->
   if i = 0 then mul_d0_d0
   else
@@ -1700,7 +1786,9 @@ let sqr_step_array = Array.init maximum (fun i ->
 let sqr_low_bit = Array.init maximum (fun i -> const_array.((i * i) mod maximum));;
 let sqr_high_bit = Array.init maximum (fun i -> const_array.((i * i) / maximum));;
 
-(* Direct digit-spine computation of F0(m) - m *)
+(* Direct digit-spine computation of F0(m) - m = (base - 1) * m in a single pass.
+   Since F0(m) shifts m's digits up by one position, the k-th digit of F0(m) is
+   the (k-1)-th digit of m (tracked in prev, starting at 0). *)
 let sub_d0_m m_tm =
   let rec loop prev a borrow acc =
     match a with
@@ -1715,7 +1803,9 @@ let sub_d0_m m_tm =
     | _ -> error "sub_d0_m" [m_tm] [] in
   loop 0 m_tm 0 [];;
 
-(* Direct digit-spine computation of (base/2) * m for even base *)
+(* Direct digit-spine computation of (base / 2) * m for even base in a single pass.
+   Each digit cur contributes (cur mod 2) * (base / 2) at the current position
+   and (cur / 2) as carry into the next digit position. *)
 let half_d0_m m_tm =
   let rec loop a carry acc =
     match a with
@@ -1728,7 +1818,9 @@ let half_d0_m m_tm =
     | _ -> error "half_d0_m" [m_tm] [] in
   loop m_tm 0 [];;
 
-(* Core single-digit multiplication: |- arg * F_j(_0) = ... *)
+(* Core digit-by-digit multiplication by a single nonzero digit: |- arg * F_j(_0) = res.
+   Recurses down arg's digits, looking up F_i(m) * F_j(_0) in mul1_right_th_array and
+   propagating any high-digit carry q = (i * j) / base via nadd_digit. *)
 let rec nmul1_right_core j arg =
   match arg with
   | Const ("_0", _) -> INST [dj0_array.(j), n_var_num] mul_0_n
@@ -1754,7 +1846,9 @@ let rec nmul1_right_core j arg =
            TRANS th (AP_TERM bit_p (TRANS th2 th_add)))
   | _ -> error "nmul1_right_core" [arg] [];;
 
-(* Optimized single-digit multiplication with single-addition fast paths for >= 3 digits *)
+(* Single-digit multiplication: |- arg * F_j(_0) = res.
+   Handles j = 1 and 1-2 digit arg directly; for arg with >= 3 digits, uses single-nadd
+   fast paths for j = 2 (arg + arg), j = base - 1 (F0 arg - arg), and j = base / 2. *)
 let nmul1_right j arg =
   if j = 1 then
     INST [arg, n_var_num] mul_n_1
@@ -1786,7 +1880,10 @@ let nmul1_right j arg =
       else
         nmul1_right_core j arg;;
 
-(* Dedicated O(n^2/2) squaring: |- tm * tm = ... *)
+(* Dedicated O(n^2/2) squaring: |- tm * tm = res.
+   Peels F0 digits via mul_d0_d0, handles 1-digit via mul_array, and otherwise applies
+   sqr_step_array.(i): recursively computes m^2 once and adds the cross-term 2*i*m
+   (using nmul1_right for 2*i or 2*i - base, and a single nadd for the carry when 2*i >= base). *)
 let rec nsqr tm =
   match tm with
   | Const ("_0", _) -> INST [zero_const, n_var_num] mul_0_n
@@ -1835,6 +1932,9 @@ and p2_v = standardize_tm `p2:num` and pm_v = standardize_tm `pm:num`
 and p02_v = standardize_tm `p02:num` and hi_v = standardize_tm `hi:num`
 and res_v = standardize_tm `res:num` and s_v = standardize_tm `s:num`;;
 
+(* Algebraic Karatsuba identity with 3 recursive products (p0, p2, pm).
+   Phrased via addition (p02 + p1 = pm) instead of subtraction so p1 = pm - (p0 + p2)
+   is computed off-kernel and verified with a single nadd. *)
 let karatsuba_base = prove (
   `x0 * y0 = p0 /\ x1 * y1 = p2 /\ (x0 + x1) * (y0 + y1) = pm /\
    p0 + p2 = p02 /\ p02 + p1 = pm /\ p1 + s * p2 = hi /\ p0 + s * hi = res ==>
@@ -1852,6 +1952,7 @@ let karatsuba_base = prove (
 
 let karatsuba_max_h = max 0 (!Arith_options.karatsuba_max_size / 2);;
 
+(* Given |- F0^{h-1}(n) = B^{h-1} * n, derive |- F0^h(n) = B^h * n *)
 let build_shift_mul prev =
   let th1 = AP_TERM d0_const prev in
   let th2 = INST [rand (concl prev), n_var_num] d0_explicit in
@@ -1865,6 +1966,8 @@ let build_shift_mul prev =
   let mul_c = NUM_MULT_CONV (mk_binop mul_op_num b_tm bh_tm) in
   TRANS th3 (TRANS assoc (AP_THM (AP_TERM mul_op_num mul_c) n_var_num));;
 
+(* Specialize karatsuba_base to shift s = B^h and rewrite every B^h * t back to F0^h(t)
+   so runtime Karatsuba works directly on F0-shifted numerals without multiplying by B^h. *)
 let build_karatsuba_h sh_th =
   let sh_const = lhand (rand (concl sh_th)) in
   let th0 = INST [sh_const, s_v] karatsuba_base in
@@ -1905,6 +2008,7 @@ let rec get_shift_mul_locked h =
       Hashtbl.add shift_mul_cache h th;
       th;;
 
+(* OCaml 4-compatible mutex guard (avoids OCaml 5.1+ Mutex.protect) *)
 let with_mutex m f =
   Mutex.lock m;
   try
@@ -1915,6 +2019,8 @@ let with_mutex m f =
     Mutex.unlock m;
     raise e;;
 
+(* Return the specialized Karatsuba combination rule for split height h.
+   Lock-free array lookup for h <= karatsuba_max_h; mutex-guarded cache for larger h. *)
 let get_karatsuba_h h =
   if h <= karatsuba_max_h then karatsuba_h_array.(h)
   else
@@ -1925,11 +2031,13 @@ let get_karatsuba_h h =
         Hashtbl.add karatsuba_h_cache h th;
         th);;
 
+(* Wrap tm in h applications of F0 (syntactically multiplies tm by base^h) *)
 let rec mk_shift h tm =
   if h <= 0 then tm
   else mk_comb (d0_const, mk_shift (h - 1) tm);;
 
-(* O(h) split_at h tm -> (lo, hi, F0^h(hi), |- lo + F0^h(hi) = tm) *)
+(* Split tm at digit position h in O(h) inferences:
+   returns (lo, hi, F0^h(hi), |- lo + F0^h(hi) = tm) with canonical lo (no leading F0s). *)
 let rec split_at h tm =
   if h = 0 then
     zero_const, tm, tm, INST [tm, n_var_num] add_0_n
@@ -1961,7 +2069,9 @@ let rec split_at h tm =
            lo, hi, sh_hi, TRANS th0 (AP_TERM d_tm th_rec))
     | _ -> error "split_at" [tm] [];;
 
-(* Specialized shifted addition: add_shift h a b -> (F0^h(b), |- a + F0^h(b) = res) *)
+(* Specialized shifted addition: add_shift h a b -> (F0^h(b), |- a + F0^h(b) = res).
+   Passes through the lowest h digits of a without carries (adding 0 at each position)
+   before delegating the upper tail to nadd. *)
 let rec add_shift h a b =
   if h = 0 then
     b, nadd a b
@@ -2005,8 +2115,12 @@ let collect_digits_ordered rarg =
   let sp, rest = List.partition is_special ds in
   sp @ rest;;
 
-(* Given already-computed cache of (digit, |- larg * F_d(_0) = res),
-   compute |- larg * F_j(_0) = res using a single nadd when possible *)
+(* Compute |- larg * F_j(_0) = res using a single nadd whenever possible, trying in order:
+   0. Cheap special digits: j = 1, 2, base - 1, base / 2.
+   1. Cached sum (larg_size >= 4): j = a + b for cached a, b (or 1 + (j - 1)) via left_add_distrib.
+   2. Cached complement: comp = base - j in cache via mul_comp_rule (rb + r = F0 larg).
+   3. Cached difference: c - b = j for cached c, b (or (j + 1) - 1) via mul_diff_rule (rb + r = rc).
+   4. Fallback: full digit-by-digit nmul1_right_core. *)
 let compute_mul1_with_cache larg larg_size j cache =
   if j = 1 then
     INST [larg, n_var_num] mul_n_1
@@ -2095,7 +2209,8 @@ let compute_mul1_with_cache larg larg_size j cache =
   else
     nmul1_right_core j larg;;
 
-(* Dedicated 2-digit right multiplication: |- larg * F_j(F_l(_0)) = ... *)
+(* Dedicated 2-digit right multiplication: |- larg * F_j(F_l(_0)) = res.
+   Computes F0(larg * F_l(_0)) + larg * F_j(_0) via nadd_d0, reusing larg * F_l(_0) when j = l. *)
 let nmul2_right larg j l =
   let th0 = INST [larg, m_var_num; dj0_array.(l), n_var_num] mul_step_array.(j) in
   let th_mul0 = nmul1_right l larg in
@@ -2105,6 +2220,11 @@ let nmul2_right larg j l =
   let add = TRANS add_th (nadd_d0 (rand (concl th_mul0)) (rand (concl th_mul1))) in
   TRANS th0 add;;
 
+(* Row-by-row (Horner) schoolbook multiplication: |- larg * rarg = res.
+   Recurses on rarg using m * F_j(n) = F0(m * n) + m * F_j(_0) (mul_step_array) and merges
+   each row with nadd_d0. When rarg_size >= 3 and larg_size >= 4, pre-populates a per-call
+   digit cache of larg * F_j(_0) via collect_digits_ordered + compute_mul1_with_cache so
+   repeated digits and sum/complement/difference combinations avoid digit-by-digit work. *)
 let mul_row larg larg_size rarg rarg_size =
   (* Pre-populate digit cache when beneficial *)
   let cache =
@@ -2148,6 +2268,16 @@ let mul_row larg larg_size rarg rarg_size =
     | _ -> error "mul_row" [larg; r] [] in
   loop rarg;;
 
+(* Top-level multiplication: |- larg * rarg = res.
+   Dispatch strategy:
+   1. Equal operands (eq_nat_tm) -> dedicated O(n^2/2) squaring (nsqr).
+   2. Zero operands -> mul_0_n / mul_n_0; trailing F0 digits -> strip via mul_d0_t / mul_t_d0.
+   3. 1- and 2-digit operands -> mul_array, nmul1_right, nmul2_right (using mul_sym if larg is shorter).
+   4. Balanced large operands (smin >= !karatsuba_threshold && smax <= 2 * smin) ->
+      Karatsuba split at h = min(smax / 2, smin - 1) using 3 recursive nmul calls,
+      off-kernel p1 = pm - (p0 + p2), shifted additions (add_shift), and get_karatsuba_h.
+   5. General case -> mul_row with the shorter operand on the right (via mul_sym if sl < sr)
+      to minimize row iterations and digit cache size. *)
 let rec nmul larg rarg =
   if eq_nat_tm larg rarg then
     nsqr larg
@@ -2199,10 +2329,12 @@ let rec nmul larg rarg =
                    let smin = if sl < sr then sl else sr in
                    let smax = if sl < sr then sr else sl in
                    if smin >= !karatsuba_threshold && smax <= 2 * smin then
+                     (* Karatsuba: write larg = x0 + B^h*x1, rarg = y0 + B^h*y1 *)
                      let h = smax / 2 in
                      let h = if h >= smin then smin - 1 else h in
                      let x0, x1, _, th_x = split_at h larg in
                      let y0, y1, _, th_y = split_at h rarg in
+                     (* Three recursive products: p0 = x0*y0, p2 = x1*y1, pm = (x0+x1)*(y0+y1) *)
                      let th_p0 = nmul x0 y0 in
                      let th_p2 = nmul x1 y1 in
                      let th_sx = nadd x0 x1 in
@@ -2210,6 +2342,7 @@ let rec nmul larg rarg =
                      let sx = rand (concl th_sx) and sy = rand (concl th_sy) in
                      let th_pm0 = MK_COMB (AP_TERM mul_op_num th_sx, th_sy) in
                      let th_pm = TRANS th_pm0 (nmul sx sy) in
+                     (* Middle term p1 = pm - (p0 + p2), verified via p02 + p1 = pm *)
                      let p0 = rand (concl th_p0) and p2 = rand (concl th_p2) and pm = rand (concl th_pm) in
                      let th_p02 = nadd p0 p2 in
                      let p02 = rand (concl th_p02) in
@@ -2218,10 +2351,12 @@ let rec nmul larg rarg =
                        | Some t -> t
                        | None -> mk_nat (dest_nat pm -/ dest_nat p02) in
                      let th_p02_p1 = nadd p02 p1 in
+                     (* Recombine: hi = p1 + B^h*p2, res = p0 + B^h*hi *)
                      let _, th_hi = add_shift h p1 p2 in
                      let hi = rand (concl th_hi) in
                      let _, th_res = add_shift h p0 hi in
                      let res = rand (concl th_res) in
+                     (* Discharge all 7 hypotheses of get_karatsuba_h h and rewrite LHS *)
                      let kth = INST [x0, x0_v; x1, x1_v; y0, y0_v; y1, y1_v;
                                      p0, p0_v; p1, p1_v; p2, p2_v; pm, pm_v;
                                      p02, p02_v; hi, hi_v; res, res_v]
@@ -2281,6 +2416,9 @@ let div_refl_thm = (UNDISCH_ALL o standardize o prove) (
   REWRITE_TAC[def_array.(1); mul_n_0_z; ADD_CLAUSES] THEN
   DISCH_THEN (fun th -> MATCH_MP_TAC DIV_REFL THEN MP_TAC th THEN ARITH_TAC));;
 
+(* Certify |- m_tm DIV n_tm = q_tm from off-kernel (q_tm, r_tm):
+   exact division checks q*n = m and 0 < n (div_exact_thm);
+   general division checks q*n + r = m and r < n (div_uniq). *)
 let ndiv_prove m_tm n_tm q_tm r_tm is_zero_r =
   let qn_th = nmul q_tm n_tm in
   if is_zero_r then
@@ -2295,6 +2433,9 @@ let ndiv_prove m_tm n_tm q_tm r_tm is_zero_r =
     let th0 = INST [r_tm, r_var_num; n_tm, n_var_num; m_tm, m_var_num; q_tm, q_var_num] div_uniq in
     MY_PROVE_HYP th1 (MY_PROVE_HYP th2 th0);;
 
+(* Proves |- m_tm DIV n_tm = q_tm by computing (q, r) off-kernel (using native 64-bit int
+   when both operands fit in chunk_k digits, else Big_int.quomod_big_int) and certifying
+   via ndiv_prove or fast special cases (m = n, n = 1, m < n). *)
 let ndiv m_tm n_tm =
   (* Fast special cases: n = 1, m = n *)
   if eq_nat_tm m_tm n_tm then

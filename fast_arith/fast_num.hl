@@ -110,7 +110,7 @@ module type Fast_num_sig =
 
     (* Minimum digit length of the shorter operand to trigger Karatsuba in nmul (when smax <= 2 * smin) *)
     val karatsuba_threshold : int ref
-
+(* 
     (* Prints operation counters and cache table sizes to stdout *)
     val print_stats : unit -> unit
     (* Resets all operation counters to 0 *)
@@ -118,21 +118,24 @@ module type Fast_num_sig =
     (* Clears all internal operation hash tables *)
     val reset_cache : unit -> unit
     (* Concatenates the digit constant names of a numeral into a hash key string (e.g. F3 (F1 _0) -> "F3F1") *)
-    val nat_tm_hash : term -> string
+    val nat_tm_hash : term -> string *)
   end;;
 
 (* Dependencies *)
 needs "misc/misc_functions.hl";;
 needs "misc/misc_vars.hl";;
-needs "arith_options.hl";;
+needs "fast_arith/fast_arith_options.hl";;
+needs "fast_arith/definitions.hl";;
 
 module Fast_num : Fast_num_sig = struct
 
 open Num;;
+open Fast_arith_definitions;;
 open Misc_functions;;
 open Misc_vars;;
 
-let arith_base = !Arith_options.base;;
+let arith_base = !Fast_arith_options.base;;
+let prefix_str = String.make 1 !Fast_arith_options.prefix;;
 let maximum = arith_base;;
 
 let _ =
@@ -148,13 +151,13 @@ let _ =
 let fnum_type = `:num->num` and
     max_const = standardize_tm (mk_small_numeral maximum);;
 
-(* |- fast_base_const = {arith_base} *)
+(* |- {prefix}_base_const = {arith_base} *)
 let base_const =
-  let eq = mk_eq (`fast_base_const : num`, mk_small_numeral arith_base) in
+  let eq = mk_eq (mk_var (prefix_str ^ "_base_const", num_type), mk_small_numeral arith_base) in
     standardize (new_basic_definition eq);;
 
 (* Names of constants which define "digits" *)
-let name_array = Array.init maximum (fun i -> "F" ^ string_of_int i);;
+let name_array = Array.init maximum (fun i -> prefix_str ^ string_of_int i);;
 
 (* Fast extraction of integer digit index from constant name (e.g., "F6" -> 6) *)
 let index_of_name s =
@@ -1423,15 +1426,6 @@ let nadd_d0 r0 r1 =
 let half_base = maximum / 2;;
 let two_num = standardize_tm `2`;;
 
-(* Private unary helper constants keep each step theorem to 2 Combs per side
-   and 1 variable occurrence, minimizing INST/vsubst and TRANS overhead.
-   They are discharged by MY_PROVE_HYP and never appear in public results. *)
-let fast_dbl_def = new_basic_definition `fast_dbl = \n. n + n`;;
-let fast_cdbl_def = new_basic_definition `fast_cdbl = \n. SUC (n + n)`;;
-
-let fast_dbl_const = standardize_tm `fast_dbl` and
-    fast_cdbl_const = standardize_tm `fast_cdbl`;;
-
 (* |- fast_dbl n = n + n  and  |- fast_cdbl n = SUC (n + n) *)
 let fast_dbl_eq =
   let th = AP_THM fast_dbl_def n_var_num in
@@ -2079,7 +2073,7 @@ let karatsuba_base = prove (
    ASM_REWRITE_TAC[LEFT_ADD_DISTRIB; RIGHT_ADD_DISTRIB; MULT_ASSOC] THEN
    REWRITE_TAC[MULT_AC; ADD_AC]]);;
 
-let karatsuba_max_h = max 0 (!Arith_options.karatsuba_max_size / 2);;
+let karatsuba_max_h = max 0 (!Fast_arith_options.karatsuba_max_size / 2);;
 
 (* Given |- F0^{h-1}(n) = B^{h-1} * n, derive |- F0^h(n) = B^h * n *)
 let build_shift_mul prev =
@@ -2723,7 +2717,7 @@ let ndiv m_tm n_tm =
 (* Stats & cache infrastructure (compatible with Nat_arith_sig)              *)
 (* ------------------------------------------------------------------------- *)
 
-type stat_data = {
+(* type stat_data = {
   mutable counter : int;
   table_size : unit -> int;
 };;
@@ -2780,6 +2774,6 @@ let nat_tm_hash tm =
       loop n_tm
     | t -> error "nat_tm_hash" [t] [] in
   loop tm;
-  Buffer.contents buf;;
+  Buffer.contents buf;; *)
 
 end;;

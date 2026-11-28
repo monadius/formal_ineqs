@@ -1,0 +1,13 @@
+needs "misc/misc_vars.hl";;
+
+module Fast_arith_definitions = struct
+
+open Misc_vars;;
+
+let fast_dbl_def = new_basic_definition `fast_dbl = \n. n + n`;;
+let fast_cdbl_def = new_basic_definition `fast_cdbl = \n. SUC (n + n)`;;
+
+let fast_dbl_const = standardize_tm `fast_dbl` and
+    fast_cdbl_const = standardize_tm `fast_cdbl`;;
+
+end;;

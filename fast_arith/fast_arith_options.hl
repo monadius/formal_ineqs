@@ -1,0 +1,13 @@
+module Fast_arith_options = struct
+
+(* Base B of arithmetic operations with natural numbers *)
+(* The base should be even *)
+let base = ref 200;;
+
+(* Single character prefix for digit constants *)
+let prefix = ref 'D';;
+
+(* Expected maximal numeral size (in base digits) for precomputing Karatsuba lemmas *)
+let karatsuba_max_size = ref 64;;
+
+end;;

@@ -1,14 +1,18 @@
+needs "fast_arith/tests/tests_base.hl";;
+
 needs "arith_options.hl";;
 Arith_options.base := 100;;
 
-needs "fast_arith/tests/tests_base.hl";;
+needs "fast_arith/fast_arith_options.hl";;
+Fast_arith_options.base := 100;;
+Fast_arith_options.prefix := 'F';;
 
 needs "fast_arith/dev/nat_arith.hl";;
 needs "fast_arith/dev/arith_num3.hl";;
 needs "fast_arith/fast_num.hl";;
 
-(* Adapter so Arith_num3 matches Arith_num_sig *)
-module Arith3 : Arith_num_sig = struct
+(* Adapter so Arith_num3 matches Test_arith_sig *)
+module Arith3 : Test_arith_sig = struct
   include Arith_num3
   let neven tm = neven tm, true
   let nodd tm = nodd tm, true
@@ -17,8 +21,8 @@ module Arith3 : Arith_num_sig = struct
   let nle a b = nle a b, true
 end;;
 
-ignore (run_all_tests ~seed:42 ~n_samples:10000 [
-  ("Nat_arith",  (module Nat_arith  : Arith_num_sig));
-  ("Arith_num3", (module Arith3     : Arith_num_sig));
-  ("Fast_num",   (module Fast_num   : Arith_num_sig));
+ignore (run_all_tests ~base:Fast_num.arith_base ~seed:42 ~n_samples:10000 [
+  ("Nat_arith",  (module Nat_arith  : Test_arith_sig));
+  ("Arith_num3", (module Arith3     : Test_arith_sig));
+  ("Fast_num",   (module Fast_num   : Test_arith_sig));
 ]);;

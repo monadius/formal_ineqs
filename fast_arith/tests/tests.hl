@@ -1,12 +1,18 @@
-needs "arith_options.hl";;
-Arith_options.base := 100;;
-
 needs "fast_arith/tests/tests_base.hl";;
 
-needs "fast_arith/fast_num.hl";;
+needs "fast_arith/fast_arith_options.hl";;
 
-(* Adapter wrapping standard HOL Light numeral conversions to match Arith_num_sig *)
-module Std_num : Arith_num_sig = struct
+Fast_arith_options.base := 100;;
+needs "fast_arith/fast_num.hl";;
+module Arith100 = Fast_num;;
+
+Fast_arith_options.base := 10;;
+Fast_arith_options.prefix := 'B';;
+loadt "fast_arith/fast_num.hl";;
+module Arith10 = Fast_num;;
+
+(* Adapter wrapping standard HOL Light numeral conversions to match Test_arith_sig *)
+module Std_num : Test_arith_sig = struct
   open Misc_vars
 
   let even_const = standardize_tm `EVEN`
@@ -64,7 +70,8 @@ module Std_num : Arith_num_sig = struct
   let ndiv a b = NUM_DIV_CONV (mk_binop div_op_num a b)
 end;;
 
-ignore (run_all_tests ~seed:42 ~n_samples:10000 [
-  ("HOL_Light", (module Std_num  : Arith_num_sig));
-  ("Fast_num",  (module Fast_num : Arith_num_sig));
+ignore (run_all_tests ~base:Arith100.arith_base ~seed:42 ~n_samples:10000 [
+  ("HOL_Light", (module Std_num  : Test_arith_sig));
+  ("Fast_num (10)", (module Arith10 : Test_arith_sig));
+  ("Fast_num (100)",  (module Arith100 : Test_arith_sig));
 ]);;

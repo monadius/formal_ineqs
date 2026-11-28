@@ -1,0 +1,476 @@
+(* ========================================================================== *)
+(*      Formal verification of nonlinear inequalities in HOL Light            *)
+(*                                                                            *)
+(*      Unified performance benchmarks and verification suite for             *)
+(*      multi-base natural number arithmetic modules                          *)
+(* ========================================================================== *)
+
+#load "unix.cma";;
+
+(* Load dependencies and arithmetic modules *)
+needs "misc/misc_vars.hl";;
+needs "arith_options.hl";;
+
+module type Arith_num_sig =
+  sig
+    val mk_nat : num -> term
+    val mk_small_nat : int -> term
+    val dest_nat : term -> num
+
+    val nsuc : term -> thm
+    val npre : term -> thm
+
+    val neven : term -> thm * bool
+    val nodd : term -> thm * bool
+    val neq0 : term -> thm * bool
+    val ngt0 : term -> thm * bool
+    val neq : term -> term -> thm * bool
+    val nlt : term -> term -> thm * bool
+    val nle : term -> term -> thm * bool
+
+    val nadd : term -> term -> thm
+    val nsub : term -> term -> thm
+    val nsub_le : term -> term -> thm * thm * bool
+    val nmul : term -> term -> thm
+    val ndiv : term -> term -> thm
+  end;;
+
+open Misc_vars;;
+
+(****************************************************************************)
+(* Core Types, Timing, and Result Decoding                                  *)
+(****************************************************************************)
+
+type arith_module = (module Arith_num_sig);;
+
+type bench_entry = {
+  label : string;
+  time : float;     (* seconds *)
+  speedup : float;  (* baseline_time / time *)
+  passed : bool;
+};;
+
+type test_result = {
+  name : string;
+  samples : int;
+  entries : bench_entry list;
+};;
+
+type decoded_result =
+  | Res_bool of bool
+  | Res_num of num
+  | Res_sub_le of num * num * num
+  | Res_invalid;;
+
+let time_batch iterations f args =
+  let n = Array.length args in
+  if n = 0 then [||], 0.0
+  else begin
+    let res = Array.make n (f args.(0)) in
+    let start = Unix.gettimeofday () in
+    for _ = 1 to iterations do
+      for i = 0 to n - 1 do
+        res.(i) <- f args.(i)
+      done
+    done;
+    let finish = Unix.gettimeofday () in
+    res, (finish -. start) /. float_of_int iterations
+  end;;
+
+let decode_thm (module Mod : Arith_num_sig) th =
+  if hyp th <> [] then Res_invalid
+  else
+    let r = rand (concl th) in
+    if r = t_const then Res_bool true
+    else if r = f_const then Res_bool false
+    else
+      try Res_num (Mod.dest_nat r)
+      with _ -> Res_invalid;;
+
+let decode_sub_le (module Mod : Arith_num_sig) (th_sub, th_le, _) =
+  if hyp th_sub <> [] || hyp th_le <> [] then Res_invalid
+  else
+    try
+      let v_sub = Mod.dest_nat (rand (concl th_sub)) in
+      let l, r = dest_binop le_op_num (concl th_le) in
+      let vl = Mod.dest_nat l and vr = Mod.dest_nat r in
+      if vl <=/ vr then Res_sub_le (v_sub, vl, vr)
+      else Res_invalid
+    with _ -> Res_invalid;;
+
+let decoded_eq a b =
+  match a, b with
+  | Res_bool x, Res_bool y -> x = y
+  | Res_num x, Res_num y -> x =/ y
+  | Res_sub_le (s1, l1, r1), Res_sub_le (s2, l2, r2) ->
+    s1 =/ s2 && l1 =/ l2 && r1 =/ r2
+  | _ -> false;;
+
+(****************************************************************************)
+(* Unified Multi-Function / Multi-Module Test Runner                        *)
+(****************************************************************************)
+
+(* Single generic benchmark function:
+   Takes a test name, iteration count, equivalence predicate, and a list of
+   targets: (label, fn_to_test, inputs_array, result_decoder).
+   The first target serves as the baseline for speedup and verification. *)
+let bench_funcs ?(iterations = 1) name eq targets =
+  match targets with
+  | [] -> invalid_arg "bench_funcs: empty target list"
+  | (base_lbl, base_f, base_args, base_dec) :: rest ->
+    let n = Array.length base_args in
+    let base_res, base_t = time_batch iterations base_f base_args in
+    let base_vals = Array.map base_dec base_res in
+    let base_ok =
+      let ok = ref true in
+      for i = 0 to n - 1 do
+        if not (eq base_vals.(i) base_vals.(i)) then ok := false
+      done;
+      !ok in
+    let base_entry = {
+      label = base_lbl;
+      time = base_t;
+      speedup = 1.0;
+      passed = base_ok;
+    } in
+    let rest_entries = List.map (fun (lbl, f, args, dec) ->
+      let res, t = time_batch iterations f args in
+      let ok = ref (Array.length args = n) in
+      if !ok then
+        for i = 0 to n - 1 do
+          if not (eq base_vals.(i) (dec res.(i))) then ok := false
+        done;
+      let sp = if t > 0.0 then base_t /. t else 0.0 in
+      { label = lbl; time = t; speedup = sp; passed = !ok }
+    ) rest in
+    let entries = base_entry :: rest_entries in
+    let all_ok = List.for_all (fun e -> e.passed) entries in
+    Printf.printf "%-28s | %5d" name n;
+    List.iteri (fun idx e ->
+      if idx = 0 then
+        Printf.printf " | %8.3f ms         " (e.time *. 1000.0)
+      else
+        Printf.printf " | %8.3f ms (%5.2fx)" (e.time *. 1000.0) e.speedup
+    ) entries;
+    Printf.printf " | %s\n" (if all_ok then "OK" else "FAIL");
+    flush stdout;
+    { name = name; samples = n; entries = entries };;
+
+let print_table_header title mods =
+  let width = 45 + 23 * List.length mods in
+  let line = String.make width '=' in
+  Printf.printf "\n%s\n %s\n%s\n" line title line;
+  Printf.printf "%-28s | %5s" "Test Case" "N";
+  List.iteri (fun idx (lbl, _) ->
+    if idx = 0 then
+      Printf.printf " | %20s" (lbl ^ " (base)")
+    else
+      Printf.printf " | %20s" lbl
+  ) mods;
+  Printf.printf " | Status\n";
+  Printf.printf "%s\n" (String.make width '-');
+  flush stdout;;
+
+(* Generic group runner for any operation across a list of (label * module) *)
+let run_op_groups title iterations mods prep get_fn get_dec eq groups =
+  print_table_header title mods;
+  List.map (fun (case_label, raw_inputs) ->
+    let targets = List.map (fun (lbl, m) ->
+      (lbl, get_fn m, prep m raw_inputs, get_dec m)
+    ) mods in
+    bench_funcs ~iterations:iterations case_label eq targets
+  ) groups;;
+
+(****************************************************************************)
+(* Deterministic Sample Generators (Small: 1-2, Medium: 2-4, Large: 5-16)  *)
+(****************************************************************************)
+
+type sample_set = {
+  unary_small  : num array;
+  unary_medium : num array;
+  unary_large  : num array;
+  unary_all    : num array;
+  small_ints   : int array;
+  bin_ss       : (num * num) array;
+  bin_sm       : (num * num) array;
+  bin_sl       : (num * num) array;
+  bin_ms       : (num * num) array;
+  bin_mm       : (num * num) array;
+  bin_ml       : (num * num) array;
+  bin_ls       : (num * num) array;
+  bin_lm       : (num * num) array;
+  bin_ll       : (num * num) array;
+  bin_all      : (num * num) array;
+};;
+
+(* Generate a random number with exactly [n_digits] digits in [base],
+   mixing uniform digits with boundary digits (0, 1, base-1). *)
+let gen_num_with_base_digits rng base n_digits =
+  if n_digits <= 0 then num_0
+  else
+    let b_num = Num.num_of_int base in
+    let pick_digit is_top =
+      let r = Random.State.int rng 10 in
+      if is_top then
+        if r = 0 then 1
+        else if r = 1 then base - 1
+        else 1 + Random.State.int rng (base - 1)
+      else
+        if r = 0 then 0
+        else if r = 1 then 1
+        else if r = 2 then base - 1
+        else Random.State.int rng base in
+    let acc = ref (Num.num_of_int (pick_digit true)) in
+    for _ = 2 to n_digits do
+      acc := (!acc */ b_num) +/ Num.num_of_int (pick_digit false)
+    done;
+    !acc;;
+
+(* Small: 0, 1-digit, or 2-digit *)
+let gen_small_num rng base =
+  let r = Random.State.int rng 20 in
+  if r = 0 then num_0
+  else if r <= 10 then gen_num_with_base_digits rng base 1
+  else gen_num_with_base_digits rng base 2;;
+
+(* Medium: 2 to 4 digits *)
+let gen_medium_num rng base =
+  let n_digits = 2 + Random.State.int rng 3 in
+  gen_num_with_base_digits rng base n_digits;;
+
+(* Large: 5 to 16 digits *)
+let gen_large_num rng base =
+  let n_digits = 5 + Random.State.int rng 12 in
+  gen_num_with_base_digits rng base n_digits;;
+
+let generate_sample_set seed n_samples =
+  let rng = Random.State.make [| seed |] in
+  let base = !Arith_options.base in
+  let b_num = Num.num_of_int base in
+  let pow_base k =
+    let acc = ref num_1 in
+    for _ = 1 to k do acc := !acc */ b_num done;
+    !acc in
+
+  (* Each of the 9 binary buckets gets q samples; each of the 3 unary tiers gets 3*q *)
+  let q = max 10 (n_samples / 9) in
+  let u = 3 * q in
+
+  let small_edge = [|
+    num_0; num_1; Num.num_of_int (base - 1);
+    b_num; b_num +/ num_1; pow_base 2 -/ num_1;
+  |] in
+  let unary_small = Array.init u (fun i ->
+    if i < Array.length small_edge then small_edge.(i)
+    else gen_small_num rng base
+  ) in
+
+  let medium_edge = [|
+    b_num; pow_base 2 -/ num_1; pow_base 2; pow_base 2 +/ num_1;
+    pow_base 3 -/ num_1; pow_base 3; pow_base 4 -/ num_1;
+  |] in
+  let unary_medium = Array.init u (fun i ->
+    if i < Array.length medium_edge then medium_edge.(i)
+    else gen_medium_num rng base
+  ) in
+
+  let large_edge = [|
+    pow_base 4; pow_base 5 -/ num_1; pow_base 6;
+    pow_base 8 -/ num_1; pow_base 10; pow_base 12 -/ num_1;
+    pow_base 16 -/ num_1;
+  |] in
+  let unary_large = Array.init u (fun i ->
+    if i < Array.length large_edge then large_edge.(i)
+    else gen_large_num rng base
+  ) in
+
+  let unary_all = Array.concat [unary_small; unary_medium; unary_large] in
+
+  let small_ints = Array.init u (fun i ->
+    if i = 0 then 0
+    else if i = 1 then 1
+    else if i = 2 then base - 1
+    else if i = 3 then base
+    else if i = 4 then base * base - 1
+    else Random.State.int rng (base * base * base)
+  ) in
+
+  let mk_same_pairs arr = Array.init q (fun i ->
+    let lhs = arr.(i) in
+    let rhs =
+      if i mod 10 = 0 then lhs
+      else arr.(q + ((i * 7 + 3) mod (2 * q))) in
+    (lhs, rhs)
+  ) in
+  let mk_cross_pairs a b off_a off_b = Array.init q (fun i ->
+    (a.((off_a + i) mod u), b.((off_b + i * 11 + 5) mod u))
+  ) in
+
+  let bin_ss = mk_same_pairs unary_small in
+  let bin_sm = mk_cross_pairs unary_small unary_medium q 0 in
+  let bin_sl = mk_cross_pairs unary_small unary_large (2 * q) 0 in
+  let bin_ms = mk_cross_pairs unary_medium unary_small q (2 * q) in
+  let bin_mm = mk_same_pairs unary_medium in
+  let bin_ml = mk_cross_pairs unary_medium unary_large (2 * q) q in
+  let bin_ls = mk_cross_pairs unary_large unary_small q q in
+  let bin_lm = mk_cross_pairs unary_large unary_medium (2 * q) (2 * q) in
+  let bin_ll = mk_same_pairs unary_large in
+  let bin_all = Array.concat [bin_ss; bin_sm; bin_sl; bin_ms; bin_mm; bin_ml; bin_ls; bin_lm; bin_ll] in
+  {
+    unary_small = unary_small;
+    unary_medium = unary_medium;
+    unary_large = unary_large;
+    unary_all = unary_all;
+    small_ints = small_ints;
+    bin_ss = bin_ss;
+    bin_sm = bin_sm;
+    bin_sl = bin_sl;
+    bin_ms = bin_ms;
+    bin_mm = bin_mm;
+    bin_ml = bin_ml;
+    bin_ls = bin_ls;
+    bin_lm = bin_lm;
+    bin_ll = bin_ll;
+    bin_all = bin_all;
+  };;
+
+let non_zero_rhs pairs =
+  Array.map (fun (n1, n2) -> if n2 =/ num_0 then (n1, num_1) else (n1, n2)) pairs;;
+
+(****************************************************************************)
+(* Main Test Suite                                                          *)
+(****************************************************************************)
+
+let run_all_tests ?(seed = 42) ?(n_samples = 4500) ?(iterations = 1)
+    (mods : (string * arith_module) list) =
+  if mods = [] then invalid_arg "run_all_tests: empty module list";
+  let samples = generate_sample_set seed n_samples in
+  let actual_n = Array.length samples.unary_all in
+  let banner = String.make (45 + 23 * List.length mods) '#' in
+  Printf.printf "\n%s\n" banner;
+  Printf.printf " HOL LIGHT MULTI-BASE NATURAL ARITHMETIC BENCHMARK SUITE\n";
+  Printf.printf " Base = %d | Seed = %d | Samples = %d (%d/bin-tier, %d/unary-tier) | Iterations = %d\n"
+    !Arith_options.base seed actual_n
+    (Array.length samples.bin_ss) (Array.length samples.unary_small) iterations;
+  Printf.printf " Tiers: small (1-2 digits), medium (2-4 digits), large (5-16 digits)\n";
+  Printf.printf " Modules: %s\n" (String.concat ", " (List.map fst mods));
+  Printf.printf "%s\n" banner;
+  flush stdout;
+
+  let prep_un (module Mod : Arith_num_sig) nums = Array.map Mod.mk_nat nums in
+  let prep_bin (module Mod : Arith_num_sig) pairs =
+    Array.map (fun (a, b) -> Mod.mk_nat a, Mod.mk_nat b) pairs in
+
+  let bin_groups op_name pairs_transform =
+    List.map (fun (lbl, arr) -> (Printf.sprintf "%s (%s)" op_name lbl, pairs_transform arr)) [
+      ("small, small",   samples.bin_ss);
+      ("small, medium",  samples.bin_sm);
+      ("small, large",   samples.bin_sl);
+      ("medium, small",  samples.bin_ms);
+      ("medium, medium", samples.bin_mm);
+      ("medium, large",  samples.bin_ml);
+      ("large, small",   samples.bin_ls);
+      ("large, medium",  samples.bin_lm);
+      ("large, large",   samples.bin_ll);
+      ("all",            samples.bin_all);
+    ] in
+
+  let unary_groups op_name = [
+    (op_name ^ " (small)",  samples.unary_small);
+    (op_name ^ " (medium)", samples.unary_medium);
+    (op_name ^ " (large)",  samples.unary_large);
+    (op_name ^ " (all)",    samples.unary_all);
+  ] in
+
+  (* Binary arithmetic & comparison operations (all via uncurry + single runner) *)
+  let bin_specs : (string * string * (arith_module -> term -> term -> thm) * ((num * num) array -> (num * num) array)) list = [
+    ("ADDITION (nadd)",       "nadd", (fun (module Mod : Arith_num_sig) -> Mod.nadd), (fun x -> x));
+    ("MULTIPLICATION (nmul)", "nmul", (fun (module Mod : Arith_num_sig) -> Mod.nmul), (fun x -> x));
+    ("SUBTRACTION (nsub)",    "nsub", (fun (module Mod : Arith_num_sig) -> Mod.nsub), (fun x -> x));
+    ("DIVISION (ndiv)",       "ndiv", (fun (module Mod : Arith_num_sig) -> Mod.ndiv), non_zero_rhs);
+    ("LESS-THAN (nlt)",       "nlt",  (fun (module Mod : Arith_num_sig) a b -> fst (Mod.nlt a b)), (fun x -> x));
+    ("LESS-OR-EQUAL (nle)",   "nle",  (fun (module Mod : Arith_num_sig) a b -> fst (Mod.nle a b)), (fun x -> x));
+    ("EQUALITY (neq)",        "neq",  (fun (module Mod : Arith_num_sig) a b -> fst (Mod.neq a b)), (fun x -> x));
+  ] in
+
+  let bin_results = List.concat (List.map (fun (title, op_name, get_bin, xform) ->
+    run_op_groups title iterations mods prep_bin
+      (fun m -> uncurry (get_bin m)) decode_thm decoded_eq
+      (bin_groups op_name xform)
+  ) bin_specs) in
+
+  (* Combined subtraction + inequality (nsub_le) *)
+  let sub_le_results =
+    run_op_groups "SUBTRACTION & LE (nsub_le)" iterations mods prep_bin
+      (fun (module Mod : Arith_num_sig) -> uncurry Mod.nsub_le)
+      decode_sub_le decoded_eq
+      (bin_groups "nsub_le" (fun x -> x)) in
+
+  (* Unary operations (single runner over all tiers) *)
+  let unary_specs : (string * (arith_module -> term -> thm)) list = [
+    ("nsuc",  (fun (module Mod : Arith_num_sig) -> Mod.nsuc));
+    ("npre",  (fun (module Mod : Arith_num_sig) -> Mod.npre));
+    ("neq0",  (fun (module Mod : Arith_num_sig) t -> fst (Mod.neq0 t)));
+    ("ngt0",  (fun (module Mod : Arith_num_sig) t -> fst (Mod.ngt0 t)));
+    ("neven", (fun (module Mod : Arith_num_sig) t -> fst (Mod.neven t)));
+    ("nodd",  (fun (module Mod : Arith_num_sig) t -> fst (Mod.nodd t)));
+  ] in
+
+  let unary_results = List.concat (List.map (fun (op_name, get_un) ->
+    run_op_groups ("UNARY: " ^ op_name) iterations mods prep_un
+      get_un decode_thm decoded_eq
+      (unary_groups op_name)
+  ) unary_specs) in
+
+  (* Conversion helpers (mk_nat, mk_small_nat, dest_nat) *)
+  let helper_mk =
+    run_op_groups "CONVERSIONS: mk_nat" iterations mods
+      (fun _ nums -> nums)
+      (fun (module Mod : Arith_num_sig) -> Mod.mk_nat)
+      (fun (module Mod : Arith_num_sig) tm -> Res_num (Mod.dest_nat tm))
+      decoded_eq
+      (unary_groups "mk_nat") in
+
+  let helper_dest =
+    run_op_groups "CONVERSIONS: dest_nat" iterations mods
+      prep_un
+      (fun (module Mod : Arith_num_sig) -> Mod.dest_nat)
+      (fun _ n -> Res_num n)
+      decoded_eq
+      (unary_groups "dest_nat") in
+
+  let helper_small =
+    run_op_groups "CONVERSIONS: mk_small_nat" iterations mods
+      (fun _ ints -> ints)
+      (fun (module Mod : Arith_num_sig) -> Mod.mk_small_nat)
+      (fun (module Mod : Arith_num_sig) tm -> Res_num (Mod.dest_nat tm))
+      decoded_eq
+      [("mk_small_nat (ints)", samples.small_ints)] in
+
+  let all_results = bin_results @ sub_le_results @ unary_results @ helper_mk @ helper_dest @ helper_small in
+
+  (* Aggregate summary per module *)
+  let n_mods = List.length mods in
+  let totals = Array.make n_mods 0.0 in
+  let passed_all = Array.make n_mods true in
+  List.iter (fun r ->
+    List.iteri (fun idx e ->
+      totals.(idx) <- totals.(idx) +. e.time;
+      if not e.passed then passed_all.(idx) <- false
+    ) r.entries
+  ) all_results;
+
+  let sep = String.make (45 + 23 * n_mods) '=' in
+  Printf.printf "\n%s\n BENCHMARK SUMMARY REPORT\n%s\n" sep sep;
+  Printf.printf " Random Seed       : %d\n" seed;
+  Printf.printf " Total Test Groups : %d\n" (List.length all_results);
+  List.iteri (fun idx (lbl, _) ->
+    let sp = if totals.(idx) > 0.0 then totals.(0) /. totals.(idx) else 0.0 in
+    let status = if passed_all.(idx) then "ALL PASSED" else "FAILURES DETECTED" in
+    Printf.printf "   %-16s : %8.4f s  (Speedup vs %-12s: %5.2fx) | %s\n"
+      lbl totals.(idx) (fst (List.hd mods)) sp status
+  ) mods;
+  Printf.printf "%s\n\n" sep;
+  flush stdout;
+  all_results;;
+

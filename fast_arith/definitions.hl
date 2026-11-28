@@ -1,8 +1,18 @@
 (* ========================================================================== *)
-(*      Common constants, variables, and standardization for Fast_arith       *)
+(*      Common constants, variables, and helpers for Fast_arith               *)
 (* ========================================================================== *)
 
 module Fast_arith_definitions = struct
+
+(* Error reporting *)
+exception Error of string * term list * thm list;;
+
+let error msg tms ths = raise (Error (msg, tms, ths));;
+let error_msg msg = raise (Error (msg, [], []));;
+let error_fmt str fmt = error_msg (sprintf str fmt);;
+
+(* Faster version of PROVE_HYP *)
+let FAST_PROVE_HYP hyp th = EQ_MP (DEDUCT_ANTISYM_RULE hyp th) hyp;;
 
 (* Term/theorem standardization for pointer sharing and fast aconv *)
 let standardize, standardize_tm, standardize_list, standardize_reset, standardize_enable =

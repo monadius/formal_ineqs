@@ -2,16 +2,26 @@
 (*      Simple performance tests for Fast_num                                 *)
 (* ========================================================================== *)
 
-needs "misc/misc_functions.hl";;
-needs "arith_options.hl";;
+needs "fast_arith/options.hl";;
 
-Arith_options.base := 100;;
-Arith_options.karatsuba_max_size := 256;;
+Fast_arith_options.base := 100;;
+Fast_arith_options.karatsuba_max_size := 256;;
 
 needs "fast_arith/fast_num.hl";;
 
-open Misc_functions;;
+open Fast_arith_definitions;;
 open Fast_num;;
+
+#load "unix.cma";;
+
+(* Applies f to arg n times and returns the total execution time *)
+let test n f arg =
+  let start = Unix.gettimeofday() in
+  let result = f arg in
+    for i = 1 to n - 1 do
+      let _ = f arg in ()
+    done;
+    result, Unix.gettimeofday() -. start;;
 
 (* Deterministic input generation (generated once) *)
 let rng = Random.State.make [| 42 |];;

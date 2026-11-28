@@ -1,7 +1,7 @@
 needs "fast_arith/definitions.hl";;
 needs "fast_arith/tests/tests_base.hl";;
 
-needs "fast_arith/fast_arith_options.hl";;
+needs "fast_arith/options.hl";;
 
 Fast_arith_options.base := 100;;
 needs "fast_arith/fast_num.hl";;
@@ -63,7 +63,7 @@ module Std_num : Test_arith_sig = struct
     if rand (concl th_le) = t_const then
       NUM_SUB_CONV (mk_binop sub_op_num a b), EQT_ELIM th_le, true
     else
-      let th_le' = Misc_functions.MY_PROVE_HYP th_le
+      let th_le' = MY_PROVE_HYP th_le
                      (INST [b, m_var_num; a, n_var_num] not_le_imp_le) in
       NUM_SUB_CONV (mk_binop sub_op_num b a), th_le', false
 

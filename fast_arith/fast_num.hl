@@ -122,15 +122,13 @@ module type Fast_num_sig =
   end;;
 
 (* Dependencies *)
-needs "misc/misc_functions.hl";;
-needs "fast_arith/fast_arith_options.hl";;
+needs "fast_arith/options.hl";;
 needs "fast_arith/definitions.hl";;
 
 module Fast_num : Fast_num_sig = struct
 
 open Num;;
 open Fast_arith_definitions;;
-open Misc_functions;;
 
 let arith_base = !Fast_arith_options.base;;
 let prefix_str = String.make 1 !Fast_arith_options.prefix;;
@@ -399,7 +397,7 @@ let TO_NAT_CONV =
       let q_tm = rand (concl th_div) in
       let r_tm = rand (concl th_mod) in
       let th0 = INST [tm, m_var_num; q_tm, q_var_num; r_tm, r_var_num] div_base in
-      let th1 = MY_PROVE_HYP th_mod (MY_PROVE_HYP th_div th0) in
+      let th1 = FAST_PROVE_HYP th_mod (FAST_PROVE_HYP th_div th0) in
       let r = dest_small_numeral r_tm in
       let th2 = INST [q_tm, n_var_num] sym_def_array.(r) in
       let th = TRANS th1 th2 in
@@ -566,7 +564,7 @@ let pre_d0_n0 = (UNDISCH_ALL o standardize o prove)
    DISCH_THEN (fun th -> REWRITE_TAC[th; mul_n_0_z]) THEN
    REWRITE_TAC[NUMERAL; ARITH_PRE]);;
 
-let pre_d0_0 = standardize (MY_PROVE_HYP eq_z_z (INST [zero_const, n_var_num] pre_d0_n0));;
+let pre_d0_0 = standardize (FAST_PROVE_HYP eq_z_z (INST [zero_const, n_var_num] pre_d0_n0));;
 
 (* PRE n = F_{max-1} m |- PRE (F0 n) = F_{max-1} (F_{max-1} m) *)
 let pre_d0_chained =
@@ -583,7 +581,7 @@ let pre_th i =
   let suc_th = nsuc pre_tm in
   let n_tm = rand (concl suc_th) in
   let th0 = INST [pre_tm, m_var_num; n_tm, n_var_num] pre_lemma in
-    standardize (MY_PROVE_HYP suc_th th0);;
+    standardize (FAST_PROVE_HYP suc_th th0);;
 
 let pre_array =
   Array.init maximum (fun i -> if i = 0 then TRUTH else pre_th i);;
@@ -601,7 +599,7 @@ let pre_d0_th j =
     let suc_th = nsuc pre_tm in
     let n_tm = rand (concl suc_th) in
     let th0 = INST [pre_tm, m_var_num; n_tm, n_var_num] pre_lemma in
-      standardize (MY_PROVE_HYP suc_th th0);;
+      standardize (FAST_PROVE_HYP suc_th th0);;
 
 let pre_d0_array = Array.init maximum pre_d0_th;;
 
@@ -611,7 +609,7 @@ let pre_d0_d1_0 =
   let suc_th = nsuc pre_tm in
   let n_tm = rand (concl suc_th) in
   let th0 = INST [pre_tm, m_var_num; n_tm, n_var_num] pre_lemma in
-    standardize (MY_PROVE_HYP suc_th th0);;
+    standardize (FAST_PROVE_HYP suc_th th0);;
 
 let pre_d0_0_array = Array.init maximum (fun j ->
   if j = 0 then TRUTH
@@ -636,7 +634,7 @@ let rec npre tm =
         if j > 0 then pre_d0_0_array.(j)
         else
           let n_th, _ = neq_zero n_tm in
-          MY_PROVE_HYP n_th (INST [n_tm, n_var_num] pre_d0_n0)
+          FAST_PROVE_HYP n_th (INST [n_tm, n_var_num] pre_d0_n0)
       | Comb (Const (name2, _), m_tm) ->
         let j = index_of_name name2 in
         if j > 0 then
@@ -647,10 +645,10 @@ let rec npre tm =
           (match rhs_n with
            | Const ("_0", _) ->
              let n_th, _ = neq_zero n_tm in
-             MY_PROVE_HYP n_th (INST [n_tm, n_var_num] pre_d0_n0)
+             FAST_PROVE_HYP n_th (INST [n_tm, n_var_num] pre_d0_n0)
            | Comb (_, q_tm) ->
              let th0 = INST [n_tm, n_var_num; q_tm, m_var_num] pre_d0_chained in
-             MY_PROVE_HYP th_n th0
+             FAST_PROVE_HYP th_n th0
            | _ -> error "npre" [tm] [])
       | _ -> error "npre" [tm] []
     else
@@ -1210,14 +1208,14 @@ let nmax ltm rtm =
   else
     let le_th, flag = nle_rec ltm rtm in
     let th0 = INST [ltm, m_var_num; rtm, n_var_num] (if flag then max_case1 else max_case2) in
-    MY_PROVE_HYP le_th th0;;
+    FAST_PROVE_HYP le_th th0;;
 
 let nmin ltm rtm =
   if eq_nat_tm ltm rtm then INST [ltm, n_var_num] min_refl
   else
     let le_th, flag = nle_rec ltm rtm in
     let th0 = INST [ltm, m_var_num; rtm, n_var_num] (if flag then min_case1 else min_case2) in
-    MY_PROVE_HYP le_th th0;;
+    FAST_PROVE_HYP le_th th0;;
 
 (* ------------------------------------------------------------------------- *)
 (* m + n: nadd                                                               *)
@@ -1603,11 +1601,11 @@ let sub_00_array = Array.init (maximum * maximum) (fun idx ->
     let d = i - j in
     let th_add = add_00_array.(j * maximum + d) in
     let th0 = INST [dj0_array.(j), n_var_num; dj0_array.(d), t_var_num; dj0_array.(i), m_var_num] sub_lemma1 in
-    MY_PROVE_HYP th_add th0
+    FAST_PROVE_HYP th_add th0
   else
     let th_lt = fst lt_00_array.(idx) in
     let th0 = INST [dj0_array.(i), m_var_num; dj0_array.(j), n_var_num] sub_lt_lemma in
-    MY_PROVE_HYP th_lt th0);;
+    FAST_PROVE_HYP th_lt th0);;
 
 (* 1-digit n <= m table for nsub_le *)
 let le_thm_00_array = Array.init (maximum * maximum) (fun idx ->
@@ -1618,7 +1616,7 @@ let le_thm_00_array = Array.init (maximum * maximum) (fun idx ->
     let d = j - i in
     let th_add = add_00_array.(i * maximum + d) in
     let th0 = INST [dj0_array.(i), n_var_num; dj0_array.(d), t_var_num; dj0_array.(j), m_var_num] le_lemma in
-    MY_PROVE_HYP th_add th0
+    FAST_PROVE_HYP th_add th0
   else
     TRUTH);;
 
@@ -1642,17 +1640,17 @@ let nsub m_tm n_tm =
              | _ ->
                (* th_lt is always true for canonical numerals (1-digit m < >=2-digit n) *)
                let th_lt, _ = nlt_rec m_tm n_tm in
-               MY_PROVE_HYP th_lt (INST [m_tm, m_var_num; n_tm, n_var_num] sub_lt_lemma))
+               FAST_PROVE_HYP th_lt (INST [m_tm, m_var_num; n_tm, n_var_num] sub_lt_lemma))
           | _ ->
             (match sub_spine_opt m_tm n_tm with
              | Some t_tm ->
                let th_add = nadd n_tm t_tm in
                let th0 = INST [n_tm, n_var_num; t_tm, t_var_num; m_tm, m_var_num] sub_lemma1 in
-               MY_PROVE_HYP th_add th0
+               FAST_PROVE_HYP th_add th0
              | None ->
                (* th_lt is always true for canonical numerals (sub_spine_opt returns None iff m < n) *)
                let th_lt, _ = nlt_rec m_tm n_tm in
-               MY_PROVE_HYP th_lt (INST [m_tm, m_var_num; n_tm, n_var_num] sub_lt_lemma)))
+               FAST_PROVE_HYP th_lt (INST [m_tm, m_var_num; n_tm, n_var_num] sub_lt_lemma)))
        | _ -> error "nsub" [m_tm; n_tm] [])
     | _ -> error "nsub" [m_tm; n_tm] [];;
 
@@ -1681,13 +1679,13 @@ let nsub_le tm1 tm2 =
              | Some t_tm ->
                let inst = INST [tm2, n_var_num; t_tm, t_var_num; tm1, m_var_num] in
                let th_add = nadd tm2 t_tm in
-               (MY_PROVE_HYP th_add (inst sub_lemma1), MY_PROVE_HYP th_add (inst le_lemma), true)
+               (FAST_PROVE_HYP th_add (inst sub_lemma1), FAST_PROVE_HYP th_add (inst le_lemma), true)
              | None ->
                (match sub_spine_opt tm2 tm1 with
                 | Some t_tm ->
                   let inst = INST [tm2, m_var_num; t_tm, t_var_num; tm1, n_var_num] in
                   let th_add = nadd tm1 t_tm in
-                  (MY_PROVE_HYP th_add (inst sub_lemma1), MY_PROVE_HYP th_add (inst le_lemma), false)
+                  (FAST_PROVE_HYP th_add (inst sub_lemma1), FAST_PROVE_HYP th_add (inst le_lemma), false)
                 | None ->
                   (* Never occurs for canonical numerals since tm1 < tm2 implies tm2 >= tm1 *)
                   error "nsub_le" [tm1; tm2] [])))
@@ -1992,12 +1990,12 @@ let nmul1_right j arg =
         let res_tm = sub_d0_m arg in
         let th_add = nadd arg res_tm in
         let th0 = INST [arg, m_var_num; res_tm, t_var_num] mul_n_bmax_rule in
-        (try MY_PROVE_HYP th_add th0 with Failure _ -> nmul1_right_core j arg)
+        (try FAST_PROVE_HYP th_add th0 with Failure _ -> nmul1_right_core j arg)
       else if has_half_opt && j = half_base then
         let res_tm = half_d0_m arg in
         let th_add = ndouble_core res_tm in
         let th0 = INST [arg, m_var_num; res_tm, t_var_num] mul_n_half_rule in
-        (try MY_PROVE_HYP th_add th0 with Failure _ -> nmul1_right_core j arg)
+        (try FAST_PROVE_HYP th_add th0 with Failure _ -> nmul1_right_core j arg)
       else
         nmul1_right_core j arg;;
 
@@ -2251,12 +2249,12 @@ let compute_mul1_with_cache larg larg_size j cache =
     let res_tm = sub_d0_m larg in
     let th_add = nadd larg res_tm in
     let th0 = INST [larg, m_var_num; res_tm, t_var_num] mul_n_bmax_rule in
-    (try MY_PROVE_HYP th_add th0 with Failure _ -> nmul1_right_core j larg)
+    (try FAST_PROVE_HYP th_add th0 with Failure _ -> nmul1_right_core j larg)
   else if has_half_opt && j = half_base then
     let res_tm = half_d0_m larg in
     let th_add = ndouble_core res_tm in
     let th0 = INST [larg, m_var_num; res_tm, t_var_num] mul_n_half_rule in
-    (try MY_PROVE_HYP th_add th0 with Failure _ -> nmul1_right_core j larg)
+    (try FAST_PROVE_HYP th_add th0 with Failure _ -> nmul1_right_core j larg)
   else if larg_size >= 4 then
     (* 1. Check if j = a + b for cached a, b (including a = b or a = 1) *)
     let rec find_pair = function
@@ -2294,7 +2292,7 @@ let compute_mul1_with_cache larg larg_size j cache =
             let th_ab = add_00_array.(j * maximum + comp) in
             let th0 = INST [dj0_array.(j), a_var_num; dj0_array.(comp), b_var_num;
                             larg, m_var_num; rb, rb_var_num; r_tm, r_var_num] mul_comp_rule in
-            (try MY_PROVE_HYP th_add (MY_PROVE_HYP th_b (MY_PROVE_HYP th_ab th0))
+            (try FAST_PROVE_HYP th_add (FAST_PROVE_HYP th_b (FAST_PROVE_HYP th_ab th0))
              with Failure _ -> nmul1_right_core j larg)
           | None -> nmul1_right_core j larg)
        | None ->
@@ -2323,7 +2321,7 @@ let compute_mul1_with_cache larg larg_size j cache =
                let th0 = INST [dj0_array.(j), a_var_num; dj0_array.(b), b_var_num;
                                dj0_array.(c), c_var_num; larg, m_var_num;
                                rc, rc_var_num; rb, rb_var_num; r_tm, r_var_num] mul_diff_rule in
-               (try MY_PROVE_HYP th_add (MY_PROVE_HYP th_b (MY_PROVE_HYP th_c (MY_PROVE_HYP th_ab th0)))
+               (try FAST_PROVE_HYP th_add (FAST_PROVE_HYP th_b (FAST_PROVE_HYP th_c (FAST_PROVE_HYP th_ab th0)))
                 with Failure _ -> nmul1_right_core j larg)
              | None -> nmul1_right_core j larg)
           | None -> nmul1_right_core j larg))
@@ -2483,9 +2481,9 @@ let rec nmul larg rarg =
                                      p02, p02_v; hi, hi_v; res, res_v]
                                     (get_karatsuba_h h) in
                      let th_k =
-                       MY_PROVE_HYP th_res (MY_PROVE_HYP th_hi
-                       (MY_PROVE_HYP th_p02_p1 (MY_PROVE_HYP th_p02
-                       (MY_PROVE_HYP th_pm (MY_PROVE_HYP th_p2 (MY_PROVE_HYP th_p0 kth)))))) in
+                       FAST_PROVE_HYP th_res (FAST_PROVE_HYP th_hi
+                       (FAST_PROVE_HYP th_p02_p1 (FAST_PROVE_HYP th_p02
+                       (FAST_PROVE_HYP th_pm (FAST_PROVE_HYP th_p2 (FAST_PROVE_HYP th_p0 kth)))))) in
                      let th_lhs = SYM (MK_COMB (AP_TERM mul_op_num th_x, th_y)) in
                      TRANS th_lhs th_k
                    else if sl < sr then
@@ -2533,7 +2531,7 @@ let div2_0_array = Array.init maximum (fun i ->
   if i = 0 then
     standardize (TRANS (AP_THM (AP_TERM div_op_num d0_0) two_num) div2_0)
   else if i = 1 then
-    standardize (MY_PROVE_HYP cdbl_zero
+    standardize (FAST_PROVE_HYP cdbl_zero
       (INST [zero_const, q_var_num; dj0_array.(1), m_var_num] div2_odd_rule))
   else
     let q = i / 2 in
@@ -2541,7 +2539,7 @@ let div2_0_array = Array.init maximum (fun i ->
     let th_dbl, rule =
       if i mod 2 = 0 then dbl_0_array.(q), div2_even_rule
       else cdbl_0_array.(q), div2_odd_rule in
-    standardize (MY_PROVE_HYP th_dbl (INST [q_tm, q_var_num; m_tm, m_var_num] rule)));;
+    standardize (FAST_PROVE_HYP th_dbl (INST [q_tm, q_var_num; m_tm, m_var_num] rule)));;
 
 (* Single-pass digit-spine halving for even base B = 2 * half_base.
    Returns (q_tm, carry) where q_tm = tm DIV 2 (canonical) and
@@ -2578,10 +2576,10 @@ let ndiv2 tm =
       let q_tm, carry = div2_spine tm in
       if carry = 0 then
         let th_dbl = ndouble_core q_tm in
-        MY_PROVE_HYP th_dbl (INST [q_tm, q_var_num; tm, m_var_num] div2_even_rule)
+        FAST_PROVE_HYP th_dbl (INST [q_tm, q_var_num; tm, m_var_num] div2_even_rule)
       else
         let th_dbl = ncdouble_core q_tm in
-        MY_PROVE_HYP th_dbl (INST [q_tm, q_var_num; tm, m_var_num] div2_odd_rule)
+        FAST_PROVE_HYP th_dbl (INST [q_tm, q_var_num; tm, m_var_num] div2_odd_rule)
   | _ -> error "ndiv2" [tm] [];;
 
 (* |- m DIV two_nat = m DIV 2, used to accelerate ndiv m (mk_small_nat 2) *)
@@ -2604,7 +2602,7 @@ let div_lt_thm =
   let th0 = INST [zero_const, q_var_num; m_var_num, r_var_num] div_uniq in
   let hyp1 = TRANS (AP_THM (AP_TERM add_op_num mul_0_n) m_var_num)
                    (INST [m_var_num, n_var_num] add_0_n) in
-  standardize (MY_PROVE_HYP hyp1 th0);;
+  standardize (FAST_PROVE_HYP hyp1 th0);;
 
 (* (0 < n <=> T), q * n = m |- m DIV n = q *)
 let div_exact_thm =
@@ -2612,12 +2610,12 @@ let div_exact_thm =
   let qn_tm = mk_binop mul_op_num q_var_num n_var_num in
   let eq_th = ASSUME (mk_eq (qn_tm, m_var_num)) in
   let hyp1 = TRANS (INST [qn_tm, n_var_num] add_n_0) eq_th in
-  let th1 = MY_PROVE_HYP hyp1 th0 in
+  let th1 = FAST_PROVE_HYP hyp1 th0 in
   (* Rewrite _0 < n to 0 < n so ngt0 discharges it directly *)
   let z_lt = prove (`(_0 < n <=> T) <=> (0 < n <=> T)`,
     REWRITE_TAC[NUMERAL]) in
   let hyp_gt0 = EQ_MP (SYM z_lt) (ASSUME `0 < n <=> T`) in
-  standardize (MY_PROVE_HYP hyp_gt0 th1);;
+  standardize (FAST_PROVE_HYP hyp_gt0 th1);;
 
 (* |- m DIV F1 _0 = m *)
 let div_1_thm = (standardize o prove) (
@@ -2638,14 +2636,14 @@ let ndiv_prove m_tm n_tm q_tm r_tm is_zero_r =
   if is_zero_r then
     let th_gt0, _ = ngt0 n_tm in
     let th0 = INST [n_tm, n_var_num; m_tm, m_var_num; q_tm, q_var_num] div_exact_thm in
-    MY_PROVE_HYP qn_th (MY_PROVE_HYP th_gt0 th0)
+    FAST_PROVE_HYP qn_th (FAST_PROVE_HYP th_gt0 th0)
   else
     let qn_tm = rand (concl qn_th) in
     let qnr_th = nadd qn_tm r_tm in
     let th1 = TRANS (AP_THM (AP_TERM add_op_num qn_th) r_tm) qnr_th in
     let th2, _ = nlt_rec r_tm n_tm in
     let th0 = INST [r_tm, r_var_num; n_tm, n_var_num; m_tm, m_var_num; q_tm, q_var_num] div_uniq in
-    MY_PROVE_HYP th1 (MY_PROVE_HYP th2 th0);;
+    FAST_PROVE_HYP th1 (FAST_PROVE_HYP th2 th0);;
 
 (* Proves |- m_tm DIV n_tm = q_tm by computing (q, r) off-kernel (using native 64-bit int
    when both operands fit in chunk_k digits, else Big_int.quomod_big_int) and certifying
@@ -2654,7 +2652,7 @@ let ndiv m_tm n_tm =
   (* Fast special cases: n = 1, m = n *)
   if eq_nat_tm m_tm n_tm then
     let th_gt0, flag = ngt0 n_tm in
-    if flag then MY_PROVE_HYP th_gt0 (INST [n_tm, n_var_num] div_refl_thm)
+    if flag then FAST_PROVE_HYP th_gt0 (INST [n_tm, n_var_num] div_refl_thm)
     else error "ndiv: division by zero" [m_tm; n_tm] []
   else
     match n_tm with
@@ -2674,10 +2672,10 @@ let ndiv m_tm n_tm =
         if n_lo = 0 then error "ndiv: division by zero" [m_tm; n_tm] []
         else if m_lo < n_lo then
           let th_lt, _ = nlt_rec m_tm n_tm in
-          MY_PROVE_HYP th_lt (INST [m_tm, m_var_num; n_tm, n_var_num] div_lt_thm)
+          FAST_PROVE_HYP th_lt (INST [m_tm, m_var_num; n_tm, n_var_num] div_lt_thm)
         else if m_lo = n_lo && m_tm = n_tm then
           let th_gt0, _ = ngt0 n_tm in
-          MY_PROVE_HYP th_gt0 (INST [n_tm, n_var_num] div_refl_thm)
+          FAST_PROVE_HYP th_gt0 (INST [n_tm, n_var_num] div_refl_thm)
         else
           let q = m_lo / n_lo in
           let r = m_lo - q * n_lo in
@@ -2699,10 +2697,10 @@ let ndiv m_tm n_tm =
           error "ndiv: division by zero" [m_tm; n_tm] []
         else if Big_int.lt_big_int m_big n_big then
           let th_lt, _ = nlt_rec m_tm n_tm in
-          MY_PROVE_HYP th_lt (INST [m_tm, m_var_num; n_tm, n_var_num] div_lt_thm)
+          FAST_PROVE_HYP th_lt (INST [m_tm, m_var_num; n_tm, n_var_num] div_lt_thm)
         else if Big_int.eq_big_int m_big n_big && m_tm = n_tm then
           let th_gt0, _ = ngt0 n_tm in
-          MY_PROVE_HYP th_gt0 (INST [n_tm, n_var_num] div_refl_thm)
+          FAST_PROVE_HYP th_gt0 (INST [n_tm, n_var_num] div_refl_thm)
         else
           let q_big, r_big = Big_int.quomod_big_int m_big n_big in
           let q_tm = mk_nat_big q_big in

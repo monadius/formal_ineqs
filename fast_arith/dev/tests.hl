@@ -3,7 +3,7 @@ needs "fast_arith/tests/tests_base.hl";;
 needs "arith_options.hl";;
 Arith_options.base := 100;;
 
-needs "fast_arith/fast_arith_options.hl";;
+needs "fast_arith/options.hl";;
 Fast_arith_options.base := 100;;
 Fast_arith_options.prefix := 'F';;
 

@@ -1,9 +1,62 @@
-needs "misc/misc_vars.hl";;
+(* ========================================================================== *)
+(*      Common constants, variables, and standardization for Fast_arith       *)
+(* ========================================================================== *)
 
 module Fast_arith_definitions = struct
 
-open Misc_vars;;
+(* Term/theorem standardization for pointer sharing and fast aconv *)
+let standardize, standardize_tm, standardize_list, standardize_reset, standardize_enable =
+  let cache = Hashtbl.create 100 in
+  let enabled = ref true in
+  let find t =
+    try Hashtbl.find cache t
+    with Not_found -> Hashtbl.add cache t t; t in
+  let rec replace tm =
+    match tm with
+    | Var _ | Const _ -> find tm
+    | Comb (s, t) -> mk_comb (replace s, replace t)
+    | Abs (v, b) -> mk_abs (replace v, replace b) in
+  let st th =
+    let concl' = replace (concl th) in
+    EQ_MP (REFL concl') th in
+  let get () = Hashtbl.fold (fun _ t ts -> t :: ts) cache [] in
+  let reset () = Hashtbl.clear cache in
+  let enable flag = enabled := flag in
+  (fun th -> if !enabled then st th else th),
+  (fun tm -> if !enabled then replace tm else tm),
+  get, reset, enable;;
 
+(* Types *)
+let num_type = `:num`;;
+
+(* Num variables *)
+let n_var_num = standardize_tm `n:num` and
+    m_var_num = standardize_tm `m:num` and
+    t_var_num = standardize_tm `t:num` and
+    p_var_num = standardize_tm `p:num` and
+    q_var_num = standardize_tm `q:num` and
+    r_var_num = standardize_tm `r:num`;;
+
+(* Bool constants *)
+let t_const = standardize_tm `T` and
+    f_const = standardize_tm `F`;;
+
+(* Num constants *)
+let zero_const = standardize_tm `_0` and
+    zero_num = standardize_tm `0`;;
+
+(* Num operations *)
+let add_op_num = standardize_tm `(+) : num->num->num` and
+    sub_op_num = standardize_tm `(-) : num->num->num` and
+    mul_op_num = standardize_tm `( * ) : num->num->num` and
+    eq_op_num = standardize_tm `(=) : num->num->bool` and
+    le_op_num = standardize_tm `(<=) : num->num->bool` and
+    lt_op_num = standardize_tm `(<) : num->num->bool` and
+    div_op_num = standardize_tm `(DIV) : num->num->num` and
+    pre_op_num = standardize_tm `PRE : num->num` and
+    suc_op_num = standardize_tm `SUC : num->num`;;
+
+(* Doubling helper definitions *)
 let fast_dbl_def = new_basic_definition `fast_dbl = \n. n + n`;;
 let fast_cdbl_def = new_basic_definition `fast_cdbl = \n. SUC (n + n)`;;
 

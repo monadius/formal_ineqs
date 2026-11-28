@@ -1,3 +1,4 @@
+needs "fast_arith/definitions.hl";;
 needs "fast_arith/tests/tests_base.hl";;
 
 needs "fast_arith/fast_arith_options.hl";;
@@ -13,7 +14,7 @@ module Arith10 = Fast_num;;
 
 (* Adapter wrapping standard HOL Light numeral conversions to match Test_arith_sig *)
 module Std_num : Test_arith_sig = struct
-  open Misc_vars
+  open Fast_arith_definitions
 
   let even_const = standardize_tm `EVEN`
   let odd_const  = standardize_tm `ODD`

@@ -24,7 +24,7 @@ let mk_rand_nat n_digits =
         if k = n_digits then 1 + Random.State.int rng (arith_base - 1)
         else Random.State.int rng arith_base in
       loop (k - 1) (mk_comb (const_array.(d), acc)) in
-  loop n_digits Misc_vars.zero_const;;
+  loop n_digits Fast_arith_definitions.zero_const;;
 
 let mk_pairs n_pairs n_digits =
   Array.init n_pairs (fun _ -> mk_rand_nat n_digits, mk_rand_nat n_digits);;

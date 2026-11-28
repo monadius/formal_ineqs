@@ -8,7 +8,7 @@
 #load "unix.cma";;
 
 (* Load dependencies and arithmetic modules *)
-needs "misc/misc_vars.hl";;
+needs "fast_arith/definitions.hl";;
 
 module type Test_arith_sig =
   sig
@@ -34,7 +34,7 @@ module type Test_arith_sig =
     val ndiv : term -> term -> thm
   end;;
 
-open Misc_vars;;
+open Fast_arith_definitions;;
 
 (****************************************************************************)
 (* Core Types, Timing, and Result Decoding                                  *)
